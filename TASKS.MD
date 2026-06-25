@@ -323,7 +323,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
   - **Done when**: tokens appear incrementally in the UI without
     re-rendering the whole list per token. The chat view is
     responsive while streaming
-- [ ] T7.7 — Markdown rendering #phase7 @ready target:phase7
+- [x] T7.7 — Markdown rendering #phase7 @ready target:phase7 _done:2026-06-25
   - **Files**: `packages/ui/src/components/Markdown.tsx`,
     `packages/ui/src/components/Message.tsx`
   - **Deps**: T7.6

@@ -1,9 +1,15 @@
 // packages/ui/src/components/Message.tsx
-// T7.5 — Render one UiMessage's parts in order. Plain text for now;
-// Markdown and tool/approval cards are added in T7.7–T7.9.
+// T7.5 — Render one UiMessage's parts in order.
+// T7.7 — text parts render through the Markdown component (GFM +
+//        shiki highlight + sanitized HTML).
+// T7.8 — tool_call parts render through ToolCallBlock.
+// T7.9 — approval parts render through ApprovalCard.
 
 import React from "react";
 import type { UiMessage } from "../api/types.js";
+import { Markdown } from "./Markdown.js";
+import { ToolCallBlock } from "./ToolCallBlock.js";
+import { ApprovalCard } from "./ApprovalCard.js";
 
 interface Props {
   message: UiMessage;
@@ -14,25 +20,23 @@ export function Message({ message }: Props): JSX.Element {
     <div className="cw-message-body">
       {message.parts.map((part, idx) => {
         if (part.kind === "text") {
-          return (
-            <p key={idx} className="cw-message-text">
-              {part.text || (message.streaming ? "…" : "")}
-            </p>
-          );
+          const text = part.text || (message.streaming ? "…" : "");
+          // User messages render as plain text; assistant messages go
+          // through the markdown renderer.
+          if (message.role === "user") {
+            return (
+              <p key={idx} className="cw-message-text">
+                {text}
+              </p>
+            );
+          }
+          return <Markdown key={idx} source={text} />;
         }
         if (part.kind === "tool_call") {
-          return (
-            <pre key={idx} className="cw-tool-call-stub">
-              tool: {part.call.name}
-            </pre>
-          );
+          return <ToolCallBlock key={idx} part={part} />;
         }
-        // Approval card — full UI in T7.9.
-        return (
-          <div key={idx} className="cw-approval-stub">
-            Approval required: {part.tool.name}
-          </div>
-        );
+        // Approval part.
+        return <ApprovalCard key={idx} part={part} />;
       })}
     </div>
   );

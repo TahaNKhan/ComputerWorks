@@ -335,6 +335,237 @@ input, textarea {
   cursor: not-allowed;
 }
 
+/* ─── Markdown (T7.7) ─────────────────────────────────────────── */
+
+.cw-markdown {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.cw-markdown p {
+  margin: 0 0 8px 0;
+}
+
+.cw-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.cw-markdown h1, .cw-markdown h2, .cw-markdown h3 {
+  margin: 12px 0 8px 0;
+  line-height: 1.25;
+}
+
+.cw-markdown ul, .cw-markdown ol {
+  margin: 0 0 8px 0;
+  padding-left: 22px;
+}
+
+.cw-markdown table {
+  border-collapse: collapse;
+  margin: 8px 0;
+}
+
+.cw-markdown th, .cw-markdown td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+}
+
+.cw-markdown blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 10px;
+  color: var(--muted);
+  margin: 0 0 8px 0;
+}
+
+.cw-markdown a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.cw-inline-code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--bg);
+  padding: 1px 5px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+}
+
+.cw-code-block {
+  position: relative;
+  background: #0d1117;
+  color: #e6edf3;
+  border-radius: 6px;
+  margin: 8px 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.cw-code-lang {
+  position: absolute;
+  top: 4px;
+  left: 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  color: #8b949e;
+}
+
+.cw-code-body {
+  padding: 24px 12px 12px 12px;
+  overflow-x: auto;
+}
+
+.cw-code-body pre {
+  margin: 0;
+  white-space: pre;
+}
+
+.cw-code-copy {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 11px;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #e6edf3;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* ─── Tool call block (T7.8) ──────────────────────────────────── */
+
+.cw-tool-call {
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.cw-tool-call[open] {
+  background: var(--bg-elev);
+}
+
+.cw-tool-call summary {
+  padding: 6px 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.cw-tool-call.error {
+  border-color: var(--error);
+}
+
+.cw-tool-icon {
+  opacity: 0.7;
+}
+
+.cw-tool-name {
+  font-weight: 600;
+}
+
+.cw-tool-badge {
+  margin-left: auto;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.cw-tool-badge-rejected {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.cw-tool-badge-error {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.cw-tool-section {
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+}
+
+.cw-tool-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.cw-tool-pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/* ─── Approval card (T7.9) ────────────────────────────────────── */
+
+.cw-approval-card {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--bg-elev);
+}
+
+.cw-approval-card.active {
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
+}
+
+.cw-approval-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.cw-approval-name {
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+.cw-approval-status {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.cw-approval-desc {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+}
+
+.cw-approval-diff {
+  margin: 0 0 8px 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 10px;
+  white-space: pre-wrap;
+}
+
+.cw-approval-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.cw-approval-actions .cw-reject {
+  border-color: var(--error);
+  color: var(--error);
+}
+
 .cw-theme-toggle {
   padding: 4px 10px;
   font-size: 14px;
