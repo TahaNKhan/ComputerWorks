@@ -50,3 +50,14 @@ yarn-error.log*
 *.bak
 *.orig
 *.rej
+
+# ── TypeScript composite build artifacts ───────────────────────────────────
+# When a package has "composite": true (required for `tsc -b` project
+# references), TypeScript emits declaration files (*.d.ts) next to
+# the source — by design, for incremental builds. Source maps go to
+# the outDir. We gitignore them all here so no per-package .gitignore
+# is needed.
+packages/*/src/**/*.d.ts
+packages/*/src/**/*.d.ts.map
+packages/*/src/**/*.js
+packages/*/src/**/*.js.map

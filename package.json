@@ -6,10 +6,11 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "bun run --filter '@computerworks/server' start:dev",
-    "build": "bun run --filter '@computerworks/*' build",
+    "dev": "bun run --filter @computerworks/server start:dev",
+    "build": "tsc -b tsconfig.build.json",
+    "build:clean": "rm -rf packages/*/dist && bun run build",
     "test": "bun test",
-    "typecheck": "bun run --filter '@computerworks/*' typecheck",
+    "typecheck": "tsc -b tsconfig.build.json",
     "lint": "echo 'lint not configured yet'",
     "start": "bun run --filter @computerworks/server start"
   },
