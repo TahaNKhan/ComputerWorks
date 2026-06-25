@@ -12,11 +12,25 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "start": "bun run src/start.ts",
+    "start:dev": "bun run --watch src/start.ts"
   },
   "devDependencies": {
     "typescript": "^5.6.3",
     "@types/bun": "^1.1.13",
     "@types/node": "^22.7.5"
+  },
+  "dependencies": {
+    "@computerworks/agent": "workspace:*",
+    "@computerworks/core": "workspace:*",
+    "@computerworks/memory-files": "workspace:*",
+    "@computerworks/tools-files": "workspace:*",
+    "@computerworks/tools-shell": "workspace:*",
+    "@fastify/cors": "^10.0.0",
+    "@fastify/sensible": "^6.0.0",
+    "fastify": "^5.0.0",
+    "jiti": "^2.7.0",
+    "zod": "^3.23.8"
   }
 }

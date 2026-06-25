@@ -162,11 +162,9 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
 
 ---
 
-## Up next 👉
-
 ### Phase 5 — Server 🛰️
 
-- [ ] T5.1 — Config loader #phase5 @ready target:phase5
+- [x] T5.1 — Config loader #phase5 @ready target:phase5 _done:2026-06-25
   - **Files**: `packages/server/src/config.ts`,
     `packages/server/src/config.test.ts`,
     `packages/server/package.json` (adds `jiti`, `zod`)
@@ -177,7 +175,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
     - Applies env overrides (`COMPUTERWORKS_*`)
     - Fails fast with a useful error on bad config
     - Unit tested with a temp config file and process env tweaks
-- [ ] T5.2 — Session store #phase5 @ready target:phase5
+- [x] T5.2 — Session store #phase5 @ready target:phase5 _done:2026-06-25
   - **Files**: `packages/server/src/session-store.ts`,
     `packages/server/src/session-store.test.ts`
   - **Deps**: T1.1
@@ -188,12 +186,12 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
     - Atomic per-line writes; concurrent appends are safe
     - Round-trip test passes for a session with several messages
       and audit entries
-- [ ] T5.3 — Audit log #phase5 @ready target:phase5
+- [x] T5.3 — Audit log #phase5 @ready target:phase5 _done:2026-06-25
   - **Files**: `packages/server/src/audit.ts`
   - **Deps**: T5.2
   - **Done when**: `appendAudit(sessionId, entry)` writes a single
     JSON line. Tested via the session store.
-- [ ] T5.4 — SSE manager #phase5 @ready target:phase5
+- [x] T5.4 — SSE manager #phase5 @ready target:phase5 _done:2026-06-25
   - **Files**: `packages/server/src/sse.ts`,
     `packages/server/src/sse.test.ts`
   - **Deps**: T1.1
@@ -202,7 +200,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
     - `send(sessionId, event)` frames events correctly
     - Heartbeat at 15s on idle streams
     - Cleanup on subscriber disconnect
-- [ ] T5.5 — Interactive approver #phase5 @ready target:phase5
+- [x] T5.5 — Interactive approver #phase5 @ready target:phase5 _done:2026-06-25
   - **Files**: `packages/server/src/interactive-approver.ts`,
     `packages/server/src/interactive-approver.test.ts`
   - **Deps**: T2.1, T5.4
@@ -215,7 +213,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
       timeout
     - Unit tested with a fake `SSEManager` and a fake `approve`
       responder
-- [ ] T5.6 — Fastify app skeleton #phase5 @ready target:phase5
+- [x] T5.6 — Fastify app skeleton #phase5 @ready target:phase5 _done:2026-06-25
   - **Files**: `packages/server/src/app.ts`,
     `packages/server/src/start.ts`,
     `packages/server/src/index.ts`,
@@ -233,7 +231,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
       warning
     - `bun run start:dev` boots the server; `GET /api/health`
       returns `{ ok: true }`
-- [ ] T5.7 — Wire agent loop into `/messages` and `/stream` #phase5 @ready target:phase5
+- [x] T5.7 — Wire agent loop into `/messages` and `/stream` #phase5 @ready target:phase5 _done:2026-06-25
   - **Files**: `packages/server/src/routes/messages.ts`,
     `packages/server/src/routes/stream.ts`,
     `packages/server/src/system-prompt.ts`,
@@ -254,11 +252,14 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
     - End-to-end test: scripted provider + auto-approver, send a
       message, assert the agent requested a tool and the tool
       result was appended
-- [ ] T5.8 — Cancel route #phase5 @ready target:phase5
+- [x] T5.8 — Cancel route #phase5 @ready target:phase5 _done:2026-06-25
   - **Files**: `packages/server/src/routes/cancel.ts`
   - **Deps**: T5.7
   - **Done when**: `POST /api/sessions/:id/cancel` aborts the
     in-flight run via the per-session `AbortController`. Tested.
+
+
+## Up next 👉
 
 ### Phase 6 — CLI 💻
 
