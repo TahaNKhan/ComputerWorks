@@ -316,7 +316,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
   - **Done when**: typing a message and pressing send POSTs to
     `/api/sessions/:id/messages` and renders the full assistant
     reply once it returns. Streaming added next.
-- [ ] T7.6 — SSE consumer + streaming tokens #phase7 @ready target:phase7
+- [x] T7.6 — SSE consumer + streaming tokens #phase7 @ready target:phase7 _done:2026-06-25
   - **Files**: `packages/ui/src/store/stream.ts`,
     updates to `MessageList.tsx`
   - **Deps**: T7.5

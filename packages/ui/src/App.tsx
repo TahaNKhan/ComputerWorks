@@ -1,10 +1,7 @@
 // packages/ui/src/App.tsx
 // T7.4 — Three-pane layout (sidebar | chat | composer).
 //
-// Layout matches §11.3 of DESIGN.MD:
-//   - Left pane: SessionList (T7.4)
-//   - Center pane: ChatView (T7.5) with MessageList
-//   - Bottom: Composer (T7.5)
+// T7.6 — also subscribes to the SSE stream for the active session.
 //
 // The header hosts a model picker (T7.10) and theme toggle. T7.5–T7.10
 // add more pieces; this file is the composition root.
@@ -15,6 +12,7 @@ import { ChatView } from "./components/ChatView.js";
 import { Composer } from "./components/Composer.js";
 import { ThemeToggle } from "./components/ThemeToggle.js";
 import { useSessionsStore } from "./store/sessions.js";
+import { subscribeToSession } from "./store/stream.js";
 
 export function App(): JSX.Element {
   const errorMessage = useSessionsStore((s) => s.errorMessage);
@@ -24,6 +22,14 @@ export function App(): JSX.Element {
   useEffect(() => {
     void loadSessions();
   }, [loadSessions]);
+
+  // T7.6 — Open (or replace) the SSE stream whenever the active
+  // session changes. We tear it down on unmount or session change.
+  useEffect(() => {
+    if (!activeSessionId) return;
+    const ctrl = subscribeToSession(activeSessionId);
+    return () => ctrl.stop();
+  }, [activeSessionId]);
 
   return (
     <div className="cw-app">
