@@ -1,14 +1,10 @@
-// packages/server/src/start.ts
-// T5.6 — Process entry point. Loads config, builds the app, and
-// starts listening.
-//
-// Refuses to bind to non-loopback interfaces without the explicit
-// `--allow-non-loopback` flag (REQUIREMENTS.MD §6).
+// packages/cli/src/serve.ts
+// T6.1 — serve command: reuses the server's start.ts logic.
 
-import { loadConfig } from "./config.js";
-import { buildApp } from "./app.js";
+import { loadConfig } from "@computerworks/server";
+import { buildApp } from "@computerworks/server";
 
-async function main() {
+export async function startServer() {
   const argv = process.argv.slice(2);
   const verbose = argv.includes("--verbose");
   const allowNonLoopback = argv.includes("--allow-non-loopback");
@@ -18,7 +14,9 @@ async function main() {
   const explicitHost = hostArg ? hostArg.slice("--host=".length) : undefined;
 
   const config = await loadConfig();
-  if (verbose) (config as unknown as { server: object }).server = { ...config.server, verbose: true };
+  if (verbose) {
+    (config as unknown as { server: object }).server = { ...config.server, verbose: true };
+  }
 
   const host = explicitHost ?? config.server?.host ?? "127.0.0.1";
   const port = explicitPort ?? config.server?.port ?? 4747;
@@ -53,11 +51,4 @@ async function main() {
   };
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
-}
-
-if (import.meta.main) {
-  main().catch((err) => {
-    console.error("Fatal:", err);
-    process.exit(1);
-  });
 }

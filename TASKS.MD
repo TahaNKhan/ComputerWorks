@@ -263,14 +263,14 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
 
 ### Phase 6 — CLI 💻
 
-- [ ] T6.1 — `computerworks serve` #phase6 @ready target:phase6
+- [x] T6.1 — `computerworks serve` #phase6 @ready target:phase6 _done:2026-06-25
   - **Files**: `packages/server/src/cli.ts`,
     `packages/cli/` (or top-level `bin/`)
   - **Deps**: T5.6
   - **Done when**: `bun run start` (or `computerworks serve`)
     loads the config and starts the server; `--port`, `--host`,
     `--verbose` flags work
-- [ ] T6.2 — `computerworks sessions` and `computerworks memory` #phase6 @ready target:phase6
+- [x] T6.2 — `computerworks sessions` and `computerworks memory` #phase6 @ready target:phase6 _done:2026-06-25
   - **Files**: same CLI module
   - **Deps**: T5.2, T4.1
   - **Done when**:
