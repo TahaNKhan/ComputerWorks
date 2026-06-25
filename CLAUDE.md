@@ -52,8 +52,8 @@ pushes. Do not bypass it.
 
 ## Phase status (check TASKS.MD for details)
 
-- ✅ Phases 0–8 done; phase/8-e2e pushed (pending merge to main)
-- Future: post-Phase 8 polish
+- ✅ Phases 0–8 done and pushed to main
+- 🎉 Build complete — no further phases planned
 
 ## CRITICAL: How to update TASKS.MD
 
