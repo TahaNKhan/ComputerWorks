@@ -335,7 +335,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
   - **Deps**: T7.6
   - **Done when**: shell output and file diffs render as
     collapsible blocks inline in the message stream
-- [ ] T7.9 — Approval card #phase7 @ready target:phase7
+- [x] T7.9 — Approval card #phase7 @ready target:phase7 _done:2026-06-25
   - **Files**: `packages/ui/src/components/ApprovalCard.tsx`
   - **Deps**: T7.6, T5.7
   - **Done when**: when `approval_required` arrives, the card
