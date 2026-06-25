@@ -28,7 +28,10 @@ export const DEFAULT_MAX_OUTPUT_BYTES = 100 * 1024; // 100KB
 const TRUNCATION_MARKER = "\n…[truncated]…\n";
 
 export const runShellInputSchema = z.object({
-  command: z.string().min(1).describe("The shell command to execute"),
+  command: z.string().min(1).describe(
+    "REQUIRED. The shell command to execute. " +
+    "This argument MUST be included on every call — omitting it will fail validation."
+  ),
   cwd: z.string().optional().describe("Override the working directory"),
   timeoutMs: z
     .number()

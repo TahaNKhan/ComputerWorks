@@ -21,7 +21,7 @@ import type {
   ToolUseBlock,
 } from "@computerworks/core";
 import type { Approver } from "./approval.js";
-import type { ToolRegistry } from "./registry.js";
+import { ToolRegistry, ToolValidationError } from "./registry.js";
 
 // DESIGN.MD §6 places AgentEvent in the agent package (not core).
 export type AgentEvent =
@@ -30,10 +30,26 @@ export type AgentEvent =
   | {
       type: "tool_result";
       call_id: string;
+      /** Name of the tool that produced this result. Phase 11 follow-up;
+       *  lets the server record `tool: <name>` in the audit log instead
+       *  of the previous hardcoded "<unknown>". */
+      tool: string;
       result: unknown;
       is_error: boolean;
       approved: boolean;
       reason?: string;
+    }
+  | {
+      /** Emitted when the model called a tool with an input shape the
+       *  zod schema rejected. Distinct from `tool_result` so the UI
+       *  can show it as an inline, structured error (model bug / bad
+       *  shape) instead of a generic failed tool. The model still
+       *  receives a tool_result with is_error=true so it can self-
+       *  correct, but the user-facing channel is friendlier. */
+      type: "tool_validation_error";
+      call_id: string;
+      tool: string;
+      message: string;
     }
   | { type: "turn_done" }
   | { type: "error"; message: string };
@@ -249,6 +265,19 @@ export async function runTurn(opts: AgentRunOptions): Promise<Message> {
       } catch (err) {
         decisionContent = err instanceof Error ? err.message : String(err);
         decisionIsError = true;
+        // Distinguish "model emitted bad args" (ToolValidationError,
+        // which we raised ourselves in the registry) from "tool ran
+        // and crashed". The former is a structural mistake we want to
+        // surface as a structured inline error to the UI; the latter
+        // is a runtime failure shown as a normal failed tool result.
+        if (err instanceof ToolValidationError) {
+          emit(onEvent, {
+            type: "tool_validation_error",
+            call_id: toolCall.id,
+            tool: toolCall.name,
+            message: decisionContent,
+          });
+        }
       }
     } else if (approved && !opts.registry) {
       decisionContent = "(no tool registry configured)";
@@ -258,6 +287,7 @@ export async function runTurn(opts: AgentRunOptions): Promise<Message> {
     emit(onEvent, {
       type: "tool_result",
       call_id: toolCall.id,
+      tool: toolCall.name,
       result: decisionContent,
       is_error: decisionIsError,
       approved,

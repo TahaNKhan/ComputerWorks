@@ -45,10 +45,21 @@ export type ServerEvent =
   | {
       type: "tool_result";
       call_id: string;
+      tool: string;
       approved: boolean;
       result?: unknown;
       is_error: boolean;
       reason?: string;
+    }
+  | {
+      /** Server-side mirror of agent's `tool_validation_error` — the
+       *  model emitted a tool call with bad args. Surfaced to the UI
+       *  as a structured inline error so users don't see a generic
+       *  "internal server error" for what is actually a model bug. */
+      type: "tool_validation_error";
+      call_id: string;
+      tool: string;
+      message: string;
     }
   | { type: "message_done"; usage: { input: number; output: number } }
   | { type: "error"; message: string }

@@ -90,6 +90,7 @@ function reconstructServerEvent(
     }
     case "tool_result": {
       const call_id = typeof body.call_id === "string" ? body.call_id : "";
+      const tool = typeof body.tool === "string" ? body.tool : "<unknown>";
       const approved = body.approved === true;
       const is_error = body.is_error === true;
       const result = "result" in body ? body.result : undefined;
@@ -97,6 +98,7 @@ function reconstructServerEvent(
       const out: Extract<ServerEvent, { type: "tool_result" }> = {
         type: "tool_result",
         call_id,
+        tool,
         approved,
         is_error,
         ...(result !== undefined ? { result } : {}),
@@ -116,6 +118,19 @@ function reconstructServerEvent(
         tool: tool as Extract<ServerEvent, { type: "approval_required" }>["tool"],
         description,
         ...(diff !== undefined ? { diff } : {}),
+      };
+      return out;
+    }
+    case "tool_validation_error": {
+      const call_id = typeof body.call_id === "string" ? body.call_id : "";
+      const tool = typeof body.tool === "string" ? body.tool : "<unknown>";
+      const message = typeof body.message === "string" ? body.message : "";
+      if (!call_id || !message) return null;
+      const out: Extract<ServerEvent, { type: "tool_validation_error" }> = {
+        type: "tool_validation_error",
+        call_id,
+        tool,
+        message,
       };
       return out;
     }

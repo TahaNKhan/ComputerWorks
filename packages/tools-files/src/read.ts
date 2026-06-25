@@ -9,7 +9,10 @@ import { resolveSafe } from "./path-safety.js";
 export const DEFAULT_MAX_READ_BYTES = 5 * 1024 * 1024; // 5MB
 
 export const readFileInputSchema = z.object({
-  path: z.string().min(1).describe("File to read. Relative to session cwd, or absolute if inside allowed root."),
+  path: z.string().min(1).describe(
+    "REQUIRED. File to read, relative to session cwd or absolute if inside allowed root. " +
+    "This argument MUST be included on every call — omitting it will fail validation."
+  ),
   maxBytes: z
     .number()
     .int()

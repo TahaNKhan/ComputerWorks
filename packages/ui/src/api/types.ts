@@ -158,10 +158,22 @@ export type ServerEvent =
   | {
       type: "tool_result";
       call_id: string;
+      tool: string;
       approved: boolean;
       result?: unknown;
       is_error: boolean;
       reason?: string;
+    }
+  | {
+      /** Server emits this when the model called a tool with an input
+       *  shape that failed zod validation (typically the model forgot
+       *  a required field). The UI shows this as an inline error
+       *  attached to the tool_call block — distinct from a runtime
+       *  tool failure shown via `tool_result.is_error`. See T11.x. */
+      type: "tool_validation_error";
+      call_id: string;
+      tool: string;
+      message: string;
     }
   | { type: "message_done"; usage: { input: number; output: number } }
   | { type: "error"; message: string }
@@ -171,11 +183,11 @@ export type ServerEvent =
 
 /** A single message rendered in the chat view. We model an assistant
  *  message as a list of `parts` so we can interleave text tokens,
- *  tool calls, tool results, and approval cards in the order they
- *  arrived. */
+ *  tool calls, tool results, validation errors, and approval cards
+ *  in the order they arrived. */
 export type MessagePart =
   | { kind: "text"; text: string }
-  | { kind: "tool_call"; call: ToolUseBlock; result?: unknown; isError?: boolean; approved?: boolean }
+  | { kind: "tool_call"; call: ToolUseBlock; result?: unknown; isError?: boolean; approved?: boolean; validationError?: string }
   | { kind: "approval"; requestId: string; tool: ToolUseBlock; description: string; diff?: string };
 
 export interface UiMessage {

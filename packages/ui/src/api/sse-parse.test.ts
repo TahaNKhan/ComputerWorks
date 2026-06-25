@@ -87,6 +87,7 @@ describe("parseSSEFrame", () => {
   test("parses tool_result with optional result and reason", () => {
     const body = JSON.stringify({
       call_id: "abc",
+      tool: "run_shell",
       approved: true,
       is_error: false,
       result: { stdout: "hi", stderr: "", exitCode: 0 },
@@ -95,9 +96,25 @@ describe("parseSSEFrame", () => {
     expect(ev).toEqual({
       type: "tool_result",
       call_id: "abc",
+      tool: "run_shell",
       approved: true,
       is_error: false,
       result: { stdout: "hi", stderr: "", exitCode: 0 },
+    });
+  });
+
+  test("parses tool_validation_error", () => {
+    const body = JSON.stringify({
+      call_id: "abc",
+      tool: "read_file",
+      message: "Tool 'read_file' was called with invalid arguments:\n- Required at 'path'\nCall read_file again with the correct argument shape.",
+    });
+    const ev = parseSSEFrame(`event: tool_validation_error\ndata: ${body}`);
+    expect(ev).toEqual({
+      type: "tool_validation_error",
+      call_id: "abc",
+      tool: "read_file",
+      message: "Tool 'read_file' was called with invalid arguments:\n- Required at 'path'\nCall read_file again with the correct argument shape.",
     });
   });
 

@@ -361,6 +361,14 @@ function reduceEvent(
       });
       break;
     }
+    case "tool_validation_error": {
+      // Attach the validation message to the matching tool_call part so
+      // the UI renders it inline (T11.x). This is distinct from a
+      // runtime tool failure; we want it to look like "the model
+      // emitted bad args" instead of "tool crashed".
+      nextMsgs = applyValidationError(msgs, ev.call_id, ev.message);
+      break;
+    }
     case "approval_required": {
       // Append an inline approval card to the message stream.
       const card: import("../api/types.js").MessagePart = {
@@ -482,6 +490,31 @@ export function applyToolResult(
           isError: info.isError,
           approved: info.approved,
         };
+      }
+      return p;
+    });
+    out.push({ ...m, parts });
+  }
+  return out;
+}
+
+/**
+ * Attach a tool-validation error message to the matching tool_call
+ * part. This is the UI-side counterpart of the agent's
+ * `ToolValidationError` — the model emitted a tool call that the
+ * server's zod schema rejected, and we want to show that fact inline
+ * rather than as a generic failed-tool badge.
+ */
+export function applyValidationError(
+  msgs: UiMessage[],
+  callId: string,
+  message: string,
+): UiMessage[] {
+  const out: UiMessage[] = [];
+  for (const m of msgs) {
+    const parts = m.parts.map((p) => {
+      if (p.kind === "tool_call" && p.call.id === callId) {
+        return { ...p, validationError: message };
       }
       return p;
     });

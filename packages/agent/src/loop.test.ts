@@ -272,4 +272,103 @@ describe("runTurn", () => {
     expect(tr!.is_error).toBe(true);
     expect(tr!.reason).toMatch(/kaboom/);
   });
+
+  it("tool validation error: missing required arg → ToolValidationError → tool_validation_error event", async () => {
+    // Tool requires `msg`; model calls with no input. zod parse throws
+    // ZodError; the registry wraps it in ToolValidationError; the loop
+    // surfaces it as a `tool_validation_error` event AND still emits a
+    // matching `tool_result` so the model can self-correct on the next
+    // iteration.
+    const provider = createScriptedProvider({
+      frames: [
+        [
+          { type: "message_start" },
+          {
+            type: "tool_call",
+            call: { type: "tool_use", id: "c1", name: "echo", input: {} }, // missing msg
+          },
+          { type: "message_done", usage: { input: 1, output: 1 } },
+        ],
+        [
+          { type: "message_start" },
+          { type: "token", delta: "ok" },
+          { type: "message_done", usage: { input: 1, output: 1 } },
+        ],
+      ],
+    });
+    const reg = new ToolRegistry();
+    reg.register(ECHO);
+    const events: unknown[] = [];
+    await runTurn({
+      provider,
+      model: "MiniMax-M3",
+      system: "",
+      history: [{ role: "user", content: "x" }],
+      registry: reg,
+      approver: new AutoApprover(() => ({ kind: "approve_once" })),
+      overrides: undefined as unknown as ProviderOverrides,
+      onEvent: (e) => events.push(e),
+      signal: new AbortController().signal,
+    });
+    const validationEv = events.find(
+      (e) => (e as { type: string }).type === "tool_validation_error",
+    ) as { tool: string; message: string; call_id: string } | undefined;
+    expect(validationEv).toBeDefined();
+    expect(validationEv!.tool).toBe("echo");
+    expect(validationEv!.call_id).toBe("c1");
+    // Should NOT leak the raw ZodError JSON dump — should be actionable.
+    expect(validationEv!.message).toMatch(/echo/);
+    expect(validationEv!.message).toMatch(/invalid arguments|Required/);
+    expect(validationEv!.message).not.toMatch(/ZodError/);
+    expect(validationEv!.message).not.toMatch(/"code":/);
+
+    // The matching tool_result is also emitted (with is_error: true)
+    // so the model sees the failure on the next provider call.
+    const tr = events.find(
+      (e) => (e as { type: string }).type === "tool_result",
+    ) as { is_error: boolean; tool: string; reason?: string } | undefined;
+    expect(tr).toBeDefined();
+    expect(tr!.is_error).toBe(true);
+    expect(tr!.tool).toBe("echo");
+    expect(tr!.reason).toMatch(/invalid arguments|Required/);
+  });
+
+  it("tool_result event carries the actual tool name (no more '<unknown>' in audit)", async () => {
+    const provider = createScriptedProvider({
+      frames: [
+        [
+          { type: "message_start" },
+          {
+            type: "tool_call",
+            call: { type: "tool_use", id: "c1", name: "echo", input: { msg: "hi" } },
+          },
+          { type: "message_done", usage: { input: 1, output: 1 } },
+        ],
+        [
+          { type: "message_start" },
+          { type: "token", delta: "ok" },
+          { type: "message_done", usage: { input: 1, output: 1 } },
+        ],
+      ],
+    });
+    const reg = new ToolRegistry();
+    reg.register(ECHO);
+    const events: unknown[] = [];
+    await runTurn({
+      provider,
+      model: "MiniMax-M3",
+      system: "",
+      history: [{ role: "user", content: "x" }],
+      registry: reg,
+      approver: new AutoApprover(() => ({ kind: "approve_once" })),
+      overrides: undefined as unknown as ProviderOverrides,
+      onEvent: (e) => events.push(e),
+      signal: new AbortController().signal,
+    });
+    const tr = events.find(
+      (e) => (e as { type: string }).type === "tool_result",
+    ) as { tool: string } | undefined;
+    expect(tr).toBeDefined();
+    expect(tr!.tool).toBe("echo");
+  });
 });

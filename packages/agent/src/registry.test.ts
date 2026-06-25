@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { z } from "zod";
-import { ToolRegistry } from "./registry.js";
+import { ToolRegistry, ToolValidationError } from "./registry.js";
 import type { ToolContext, ToolDefinition } from "@computerworks/core";
 
 function makeCtx(): ToolContext {
@@ -65,6 +65,44 @@ describe("ToolRegistry", () => {
     await expect(
       reg.execute("echo", { msg: 42 }, makeCtx()),
     ).rejects.toThrow();
+  });
+
+  it("execute throws ToolValidationError (not raw ZodError) for bad input", async () => {
+    const reg = new ToolRegistry();
+    reg.register(echoTool);
+    let caught: unknown;
+    try {
+      await reg.execute("echo", { msg: 42 }, makeCtx());
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ToolValidationError);
+    const e = caught as ToolValidationError;
+    expect(e.toolName).toBe("echo");
+    expect(e.issues.length).toBeGreaterThan(0);
+    expect(e.message).toMatch(/echo/);
+    expect(e.message).toMatch(/invalid arguments/);
+    // Should NOT leak the raw ZodError JSON dump.
+    expect(e.message).not.toMatch(/ZodError/);
+    expect(e.message).not.toMatch(/"code":/);
+  });
+
+  it("execute throws ToolValidationError when a required field is missing", async () => {
+    const reg = new ToolRegistry();
+    reg.register(echoTool);
+    let caught: unknown;
+    try {
+      // Missing `msg` entirely.
+      await reg.execute("echo", {}, makeCtx());
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ToolValidationError);
+    const e = caught as ToolValidationError;
+    expect(e.toolName).toBe("echo");
+    // Issue should point at the missing `msg` field.
+    expect(e.issues.some((i) => i.path === "msg")).toBe(true);
+    expect(e.message).toMatch(/'msg'/);
   });
 
   it("execute returns a descriptive error for unknown tools", async () => {

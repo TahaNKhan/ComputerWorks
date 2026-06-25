@@ -414,6 +414,62 @@ User noticed the session transcript (messages.jsonl) only contains the user mess
       tool(tool_result), assistant(text)]` — fails before this
       fix, passes after
 
+### Phase 12 — URL-routable sessions + LLM-generated titles
+
+Two UX asks that go together: the sidebar's session id should be
+shareable via URL, and the session title should auto-generate
+from the first turn instead of staying blank or "(untitled)".
+
+URL shape: `/?session=<id>` (query param — keeps it a pure SPA,
+no Fastify SPA-fallback needed). Title gen: fire-and-forget
+LLM call after each turn, skipped when the title is already
+non-empty (so manual renames + titled-on-create survive).
+
+- [ ] T12.1 — Frontend URL sync (activeSessionId ↔ ?session=<id>) #phase12 @ready target:phase12
+  - **Files**: `packages/ui/src/lib/router.ts` (new),
+    `packages/ui/src/main.tsx` (mount the router),
+    `packages/ui/src/store/sessions.ts` (write URL on
+    `switchSession` + read URL on init),
+    `packages/ui/src/store/sessions.test.ts` (URL helpers)
+  - **Deps**: none
+  - **Done when**:
+    - `router.ts` exposes: `getSessionFromUrl()`,
+      `setSessionInUrl(id | null)`,
+      `subscribeUrlChange(cb)` (popstate-driven)
+    - On app boot: `getSessionFromUrl()` reads the param; if it
+      names a real session in the loaded list, that becomes the
+      active session. If it names an unknown id, the param is
+      cleared and an error toast surfaces.
+    - `switchSession(id)` writes the new id via `pushState` so
+      the browser back button walks the session history.
+    - `popstate` (user clicking back/forward) updates
+      `activeSessionId` accordingly.
+    - Visiting `/` with no param shows the empty state.
+
+- [ ] T12.2 — Backend LLM-generated session titles #phase12 @ready target:phase12
+  - **Files**: `packages/server/src/title-generator.ts` (new),
+    `packages/server/src/routes/messages.ts` (call after runTurn),
+    `packages/server/src/sse.ts` (add `title_updated` event),
+    `packages/ui/src/api/types.ts` +
+    `packages/ui/src/store/sessions.ts` (consume the new event)
+  - **Deps**: T12.1
+  - **Done when**:
+    - `generateTitle(deps, sessionId)` reads the first user
+      message + first assistant text from the store, calls
+      `provider.chat` once with a "summarize as 3-5 word title"
+      prompt, sanitizes the result (strip quotes/whitespace,
+      truncate to 80 chars), and PATCHes `meta.title`.
+    - Skipped entirely if `meta.title` is already non-empty
+      (manual rename or `createSession({ title })`).
+    - Failures (LLM error, no messages yet) are logged and
+      swallowed — the user experience never blocks on a title.
+    - On success: emits a `title_updated` SSE event on the
+      session's stream with `{ sessionId, title }`. The UI
+      reducer updates the session in `sessions` and (if it's
+      the active one) the meta header.
+    - Unit test for the title sanitizer + a server test that
+      asserts the PATCH happens and the SSE event is emitted.
+
 ## Gates (run continuously)
 
 - [ ] Typecheck gate #gates @ready — every PR (or every push) runs

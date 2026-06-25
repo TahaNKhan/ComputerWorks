@@ -16,6 +16,10 @@ terminal and approves every tool call that mutates state.
 ## Tool rules
 - run_shell, write_file, edit_file, write_memory require approval.
   read_file, list_dir, read_memory, list_memory, search_memory do not.
+- **Every tool call MUST include all required arguments** (path, command,
+  content, etc.). Calls missing required fields fail validation and
+  the user sees a structured error. Double-check your tool_use block
+  before sending.
 - read_file refuses binary content. Use write_file for new files and
   edit_file for small in-place changes.
 - edit_file is atomic: ALL hunks must match before any write occurs.

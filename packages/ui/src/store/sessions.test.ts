@@ -7,6 +7,7 @@ import {
   appendToken,
   appendToolCall,
   applyToolResult,
+  applyValidationError,
   finalizeStreaming,
 } from "./sessions.js";
 import type { ToolUseBlock, UiMessage } from "../api/types.js";
@@ -98,5 +99,37 @@ describe("finalizeStreaming", () => {
     const finalized: UiMessage = { ...newStreamingMsg("done"), streaming: false };
     const out = finalizeStreaming([finalized]);
     expect(out).toEqual([finalized]);
+  });
+});
+
+describe("applyValidationError", () => {
+  test("attaches the validation message to the matching tool_call part", () => {
+    const msgs: UiMessage[] = [
+      {
+        id: "a-1",
+        role: "assistant",
+        parts: [
+          { kind: "text", text: "let me read that file" },
+          { kind: "tool_call", call: SHELL_CALL },
+        ],
+      },
+    ];
+    const out = applyValidationError(
+      msgs,
+      "call-1",
+      "Tool 'read_file' was called with invalid arguments:\n- Required at 'path'",
+    );
+    const tc = out[0]!.parts[1] as Extract<
+      UiMessage["parts"][number],
+      { kind: "tool_call" }
+    >;
+    expect(tc.validationError).toMatch(/read_file/);
+    expect(tc.validationError).toMatch(/'path'/);
+  });
+
+  test("no-op when there is no matching tool_call part", () => {
+    const msgs: UiMessage[] = [newStreamingMsg("hi")];
+    const out = applyValidationError(msgs, "call-99", "shouldn't crash");
+    expect(out).toEqual(msgs);
   });
 });

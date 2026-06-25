@@ -73,13 +73,13 @@ export class InteractiveApprover implements Approver {
   ): Promise<ApprovalDecision> {
     // 1. Check global shell allowlist (design says: still logged).
     if (req.call.name === "run_shell" && this.matchesGlobalShell(req.call.input)) {
-      this.emit({ type: "tool_result", call_id: req.call.id, approved: true, result: undefined, is_error: false });
+      this.emit({ type: "tool_result", call_id: req.call.id, tool: req.call.name, approved: true, result: undefined, is_error: false });
       return { kind: "approve_once" };
     }
 
     // 2. Check session allowlist.
     if (this.matchesSessionAllowlist(req.call)) {
-      this.emit({ type: "tool_result", call_id: req.call.id, approved: true, result: undefined, is_error: false });
+      this.emit({ type: "tool_result", call_id: req.call.id, tool: req.call.name, approved: true, result: undefined, is_error: false });
       return { kind: "approve_once" };
     }
 
@@ -106,6 +106,7 @@ export class InteractiveApprover implements Approver {
           this.emit({
             type: "tool_result",
             call_id: req.call.id,
+            tool: req.call.name,
             approved: false,
             result: undefined,
             is_error: true,
@@ -124,6 +125,7 @@ export class InteractiveApprover implements Approver {
         this.emit({
           type: "tool_result",
           call_id: req.call.id,
+          tool: req.call.name,
           approved: decision.kind !== "reject",
           result: undefined,
           is_error: decision.kind === "reject",

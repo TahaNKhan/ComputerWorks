@@ -134,7 +134,7 @@ export async function runAgentForSession(
               ts: new Date().toISOString(),
               sessionId,
               callId: ev.call_id,
-              tool: "<unknown>",
+              tool: ev.tool,
               decision: ev.approved ? "approve_once" : "reject",
               ...(ev.reason ? { reason: ev.reason } : {}),
               isError: ev.is_error,
@@ -176,10 +176,18 @@ function mapAgentEventToServer(
       return {
         type: "tool_result",
         call_id: ev.call_id,
+        tool: ev.tool,
         result: ev.result,
         is_error: ev.is_error,
         approved: ev.approved,
         ...(ev.reason ? { reason: ev.reason } : {}),
+      };
+    case "tool_validation_error":
+      return {
+        type: "tool_validation_error",
+        call_id: ev.call_id,
+        tool: ev.tool,
+        message: ev.message,
       };
     case "turn_done":
       return { type: "done" };
