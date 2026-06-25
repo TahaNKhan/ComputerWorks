@@ -1,14 +1,31 @@
 /* packages/ui/src/styles/global.css
  * T7.4 — Three-pane layout + basic theme variables.
+ * T10.1 — Mobile-friendly responsive layout. Mobile-first: the default
+ *         styles target < 768px (single pane, drawer-based sidebar).
+ *         Tablet (≥768px) shows a 2-pane layout; desktop (≥1024px) shows
+ *         the full 3-pane layout.
  *
- * Layout:
+ * Layout (mobile / default):
  *   ┌────────────────────────────────────────────┐
- *   │ header (brand + theme toggle)              │
+ *   │ header (☰ brand ⌕ ⚙ ☾)                     │
+ *   ├────────────────────────────────────────────┤
+ *   │ chat pane                                  │
+ *   │   ├─ message list                          │
+ *   │   └─ composer (sticky bottom)              │
+ *   └────────────────────────────────────────────┘
+ *   SessionList opens as a slide-in drawer from the left.
+ *
+ * Layout (tablet ≥768px):
+ *   ┌────────────────────────────────────────────┐
+ *   │ header                                     │
  *   ├──────────┬─────────────────────────────────┤
  *   │ session  │ chat pane                       │
  *   │ list     │   ├─ message list               │
- *   │          │   └─ composer                   │
+ *   │ (always  │   └─ composer                   │
+ *   │ visible) │                                 │
  *   └──────────┴─────────────────────────────────┘
+ *
+ * Layout (desktop ≥1024px): unchanged from Phase 7 (3 panes).
  */
 
 :root {
@@ -55,8 +72,11 @@ body {
   font-family: var(--font-sans);
   background: var(--bg);
   color: var(--fg);
-  font-size: 14px;
+  /* 16px base prevents iOS zoom-on-focus for inputs/textarea. */
+  font-size: 16px;
   line-height: 1.5;
+  /* Prevent horizontal scroll on small screens. */
+  overflow-x: hidden;
 }
 
 button {
@@ -87,21 +107,34 @@ input, textarea {
 .cw-app {
   display: grid;
   grid-template-rows: auto 1fr;
-  height: 100vh;
+  /* 100dvh handles mobile browser chrome (URL bar collapse). */
+  min-height: 100dvh;
+  height: 100dvh;
+  /* Stay inside the viewport — no horizontal scroll. */
+  max-width: 100vw;
+  overflow: hidden;
 }
 
 .cw-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
+  gap: 8px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elev);
+  /* Honor iPhone notch safe area at the top. */
+  padding-top: calc(8px + env(safe-area-inset-top));
 }
 
 .cw-brand {
   font-weight: 700;
   letter-spacing: 0.02em;
+  /* Don't let the brand squeeze the action buttons off-screen. */
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cw-spacer {
@@ -110,38 +143,94 @@ input, textarea {
 
 .cw-main {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  /* Mobile (default): single column. Sidebar is hidden via display:none
+     and shown as a drawer when .cw-sidebar.open is set. */
+  grid-template-columns: 1fr;
   min-height: 0;
+  position: relative;
 }
 
 .cw-chat-pane {
   display: grid;
   grid-template-rows: 1fr auto;
   min-height: 0;
+  min-width: 0;
   background: var(--bg);
+  /* Don't let long code blocks push the layout sideways. */
+  overflow: hidden;
 }
 
 .cw-empty {
-  padding: 32px;
+  padding: 24px 16px;
   color: var(--muted);
 }
 
 /* ─── Sidebar / session list ──────────────────────────────────── */
 
 .cw-sidebar {
-  border-right: 1px solid var(--border);
+  /* Hidden by default on mobile — slides in as a drawer when .open. */
+  display: none;
   background: var(--bg-elev);
+  min-height: 0;
+}
+
+/* Drawer mode (mobile): fixed overlay sliding in from the left. */
+.cw-sidebar.open {
   display: grid;
   grid-template-rows: auto 1fr;
-  min-height: 0;
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  /* Don't overlap the iPhone home-indicator safe area at the bottom. */
+  padding-bottom: env(safe-area-inset-bottom);
+  width: min(86vw, 320px);
+  /* Sit above the header (z implicit) but below modal backdrops. */
+  z-index: 900;
+  border-right: 1px solid var(--border);
+  box-shadow: 4px 0 16px rgba(0, 0, 0, 0.18);
+  animation: cw-slide-in 160ms ease-out;
+}
+
+@keyframes cw-slide-in {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+
+/* Backdrop only shown on mobile when drawer is open. */
+.cw-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 850;
+  animation: cw-fade-in 160ms ease-out;
+}
+
+@keyframes cw-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 .cw-sidebar-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
+}
+
+/* Drawer gets its own close button (hidden on desktop where the
+   sidebar is a normal column). */
+.cw-drawer-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Apple HIG: 44px min tap target. */
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 18px;
+  line-height: 1;
 }
 
 .cw-sidebar-header h2 {
@@ -168,7 +257,9 @@ input, textarea {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 12px;
+  /* Larger tap target on mobile; trimmed back on desktop. */
+  padding: 12px;
+  min-height: 44px;
   cursor: pointer;
   border-bottom: 1px solid transparent;
 }
@@ -190,39 +281,40 @@ input, textarea {
 
 .cw-row-title {
   flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .cw-row-actions {
-  display: none;
+  display: inline-flex;
   gap: 4px;
 }
 
-.cw-row:hover .cw-row-actions {
-  display: inline-flex;
-}
-
 .cw-row-actions button {
-  padding: 2px 6px;
-  font-size: 12px;
+  padding: 6px 8px;
+  font-size: 14px;
   line-height: 1;
+  min-width: 36px;
+  min-height: 36px;
 }
 
 /* ─── Error banner ────────────────────────────────────────────── */
 
 .cw-error-banner {
   position: fixed;
-  bottom: 12px;
+  left: 12px;
   right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
   max-width: 400px;
+  margin: 0 auto;
   padding: 10px 14px;
   border-radius: 8px;
   background: var(--error-bg);
   color: var(--error);
   border: 1px solid var(--error);
-  font-size: 13px;
+  font-size: 14px;
   z-index: 100;
 }
 
@@ -237,11 +329,12 @@ input, textarea {
 /* ─── Chat view + message list (T7.5) ─────────────────────────── */
 
 .cw-chat-view {
-  padding: 16px;
+  padding: 12px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-height: 0;
 }
 
 .cw-message-list {
@@ -251,13 +344,17 @@ input, textarea {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
 }
 
 .cw-message {
-  padding: 10px 14px;
+  padding: 10px 12px;
   border-radius: 10px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .cw-message-user {
@@ -265,12 +362,12 @@ input, textarea {
   color: white;
   border-color: transparent;
   align-self: flex-end;
-  max-width: 80%;
+  max-width: 88%;
 }
 
 .cw-message-assistant {
   align-self: flex-start;
-  max-width: 90%;
+  max-width: 100%;
 }
 
 .cw-message-body p {
@@ -306,22 +403,36 @@ input, textarea {
   border-top: 1px solid var(--border);
   background: var(--bg-elev);
   padding: 10px 12px;
+  /* Stay above the mobile keyboard + iPhone home indicator. */
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
   display: grid;
   grid-template-rows: auto auto;
   gap: 8px;
+  /* Sticky so the input never gets pushed off-screen on small viewports. */
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
 }
 
 .cw-composer-input {
   width: 100%;
   resize: vertical;
   min-height: 60px;
-  max-height: 240px;
+  max-height: 200px;
+  /* 16px prevents iOS zoom-on-focus. */
+  font-size: 16px;
 }
 
 .cw-composer-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.cw-composer-actions button {
+  min-height: 44px;
+  padding: 8px 16px;
+  font-size: 15px;
 }
 
 .cw-send {
@@ -338,12 +449,15 @@ input, textarea {
 /* ─── Markdown (T7.7) ─────────────────────────────────────────── */
 
 .cw-markdown {
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.5;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .cw-markdown p {
   margin: 0 0 8px 0;
+  overflow-wrap: anywhere;
 }
 
 .cw-markdown p:last-child {
@@ -353,16 +467,21 @@ input, textarea {
 .cw-markdown h1, .cw-markdown h2, .cw-markdown h3 {
   margin: 12px 0 8px 0;
   line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .cw-markdown ul, .cw-markdown ol {
   margin: 0 0 8px 0;
   padding-left: 22px;
+  overflow-wrap: anywhere;
 }
 
 .cw-markdown table {
   border-collapse: collapse;
   margin: 8px 0;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .cw-markdown th, .cw-markdown td {
@@ -375,11 +494,13 @@ input, textarea {
   padding-left: 10px;
   color: var(--muted);
   margin: 0 0 8px 0;
+  overflow-wrap: anywhere;
 }
 
 .cw-markdown a {
   color: var(--accent);
   text-decoration: underline;
+  overflow-wrap: anywhere;
 }
 
 .cw-inline-code {
@@ -401,6 +522,7 @@ input, textarea {
   overflow: hidden;
   font-family: var(--font-mono);
   font-size: 12px;
+  max-width: 100%;
 }
 
 .cw-code-lang {
@@ -415,6 +537,7 @@ input, textarea {
 .cw-code-body {
   padding: 24px 12px 12px 12px;
   overflow-x: auto;
+  max-width: 100%;
 }
 
 .cw-code-body pre {
@@ -426,8 +549,9 @@ input, textarea {
   position: absolute;
   top: 4px;
   right: 4px;
-  font-size: 11px;
-  padding: 2px 8px;
+  font-size: 12px;
+  padding: 4px 8px;
+  min-height: 32px;
   background: rgba(255, 255, 255, 0.06);
   color: #e6edf3;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -513,6 +637,7 @@ input, textarea {
   border: 1px solid var(--accent);
   border-radius: 8px;
   background: var(--bg-elev);
+  min-width: 0;
 }
 
 .cw-approval-card.active {
@@ -524,12 +649,15 @@ input, textarea {
   align-items: center;
   gap: 8px;
   margin-bottom: 6px;
-  font-size: 13px;
+  font-size: 14px;
+  flex-wrap: wrap;
 }
 
 .cw-approval-name {
   font-weight: 600;
   font-family: var(--font-mono);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .cw-approval-status {
@@ -542,7 +670,8 @@ input, textarea {
 
 .cw-approval-desc {
   margin: 0 0 8px 0;
-  font-size: 13px;
+  font-size: 14px;
+  overflow-wrap: anywhere;
 }
 
 .cw-approval-diff {
@@ -554,11 +683,22 @@ input, textarea {
   border-radius: 4px;
   padding: 6px 10px;
   white-space: pre-wrap;
+  overflow-x: auto;
+  max-width: 100%;
 }
 
 .cw-approval-actions {
   display: flex;
+  /* Stack vertically on mobile so each button gets full width. */
+  flex-direction: column;
   gap: 8px;
+}
+
+.cw-approval-actions button {
+  min-height: 44px;
+  font-size: 15px;
+  /* Stretch to full width on mobile for thumb-friendly tapping. */
+  width: 100%;
 }
 
 .cw-approval-actions .cw-reject {
@@ -573,16 +713,26 @@ input, textarea {
   inset: 0;
   background: rgba(0, 0, 0, 0.45);
   display: grid;
-  place-items: center;
+  /* align-items safe on small screens even with oversize content */
+  align-items: safe center;
+  justify-items: center;
   z-index: 1000;
+  padding: 12px;
+  /* Respect notches on phones. */
+  padding-top: calc(12px + env(safe-area-inset-top));
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  padding-left: calc(12px + env(safe-area-inset-left));
+  padding-right: calc(12px + env(safe-area-inset-right));
 }
 
 .cw-modal {
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 10px;
-  min-width: 400px;
-  max-width: 540px;
+  /* Mobile-friendly: take all the space the backdrop gives you, but
+     never wider than the desktop max-width. */
+  width: min(100%, 540px);
+  max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
   overflow: hidden;
   display: grid;
   grid-template-rows: auto 1fr auto;
@@ -592,18 +742,27 @@ input, textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
 }
 
 .cw-modal-header h2 {
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
+}
+
+.cw-modal-header button {
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 16px;
 }
 
 .cw-modal-body {
   padding: 14px;
   min-height: 80px;
+  overflow-y: auto;
+  font-size: 15px;
 }
 
 .cw-modal-footer {
@@ -612,6 +771,12 @@ input, textarea {
   gap: 8px;
   padding: 10px 14px;
   border-top: 1px solid var(--border);
+}
+
+.cw-modal-footer button {
+  min-height: 44px;
+  padding: 8px 16px;
+  font-size: 15px;
 }
 
 .cw-modal .cw-primary {
@@ -625,31 +790,38 @@ input, textarea {
   gap: 4px;
 }
 
+.cw-field > select,
+.cw-field > input,
+.cw-field > textarea {
+  font-size: 16px;
+  min-height: 44px;
+}
+
 .cw-field-help {
   margin: 4px 0 0 0;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
 }
 
 .cw-error {
   margin-top: 8px;
   color: var(--error);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 /* ─── Session switcher (T7.10) ────────────────────────────────── */
 
 .cw-modal-switcher {
-  min-width: 480px;
+  /* No min-width on mobile — let it stretch with .cw-modal. */
 }
 
 .cw-switcher-input {
   width: 100%;
-  padding: 10px 14px;
+  padding: 12px 14px;
   border: none;
   border-bottom: 1px solid var(--border);
   border-radius: 0;
-  font-size: 14px;
+  font-size: 16px;
   background: transparent;
 }
 
@@ -657,19 +829,148 @@ input, textarea {
   list-style: none;
   margin: 0;
   padding: 4px 0;
-  max-height: 300px;
+  max-height: 50dvh;
   overflow-y: auto;
 }
 
 .cw-switcher-trigger,
 .cw-settings-trigger {
-  padding: 4px 10px;
-  font-size: 14px;
+  padding: 8px 10px;
+  font-size: 16px;
   line-height: 1;
+  min-width: 44px;
+  min-height: 44px;
 }
 
 .cw-theme-toggle {
-  padding: 4px 10px;
-  font-size: 14px;
+  padding: 8px 10px;
+  font-size: 16px;
   line-height: 1;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* Hamburger button — only shown on mobile via media query below. */
+.cw-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 10px;
+  font-size: 18px;
+  line-height: 1;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* ─── Breakpoints (T10.1) ─────────────────────────────────────── */
+
+/* Tablet: ≥768px — show sidebar inline, 2 panes. */
+@media (min-width: 768px) {
+  .cw-app {
+    /* Allow a wider grid; main still flexes within the viewport. */
+    overflow: hidden;
+  }
+
+  .cw-header {
+    padding: 8px 16px;
+    padding-top: 8px;
+    gap: 12px;
+  }
+
+  .cw-main {
+    grid-template-columns: 240px 1fr;
+  }
+
+  /* Inline sidebar (no drawer) on tablet+. */
+  .cw-sidebar {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    border-right: 1px solid var(--border);
+    position: static;
+    width: auto;
+    box-shadow: none;
+    padding-bottom: 0;
+    animation: none;
+  }
+
+  /* Hide the mobile-only close button on tablet+. */
+  .cw-drawer-close {
+    display: none;
+  }
+
+  /* No backdrop when sidebar is inline. */
+  .cw-drawer-backdrop {
+    display: none;
+  }
+
+  /* Hamburger button goes away once the sidebar is visible inline. */
+  .cw-menu-trigger {
+    display: none;
+  }
+
+  .cw-chat-view {
+    padding: 16px;
+  }
+
+  .cw-message {
+    padding: 10px 14px;
+  }
+
+  .cw-message-user {
+    max-width: 80%;
+  }
+
+  .cw-message-assistant {
+    max-width: 90%;
+  }
+
+  /* Side-by-side approval buttons return on tablet+. */
+  .cw-approval-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .cw-approval-actions button {
+    width: auto;
+    flex: 1 1 auto;
+    min-width: 120px;
+  }
+
+  .cw-row {
+    padding: 8px 12px;
+    min-height: 0;
+  }
+
+  .cw-row-actions {
+    display: none;
+  }
+
+  .cw-row:hover .cw-row-actions,
+  .cw-row:focus-within .cw-row-actions {
+    display: inline-flex;
+  }
+
+  .cw-error-banner {
+    left: auto;
+    right: 12px;
+    bottom: 12px;
+  }
+
+  .cw-new-session {
+    font-size: 12px;
+    padding: 4px 10px;
+    min-height: 0;
+  }
+}
+
+/* Desktop: ≥1024px — full 3-pane layout. The right rail is added by
+   specific apps, but the grid columns are already prepared here. */
+@media (min-width: 1024px) {
+  .cw-main {
+    grid-template-columns: 280px 1fr;
+  }
+
+  .cw-sidebar {
+    /* Keep the inline sidebar with its Phase 7 width. */
+  }
 }

@@ -2,6 +2,9 @@
 // Composition root. Wires the layout, the SSE subscription, and the
 // global keyboard shortcuts (Cmd/Ctrl+K session switcher,
 // Cmd/Ctrl+, settings, Esc cancel).
+// T10 — Adds a mobile drawer for the SessionList. On narrow screens
+//        the sidebar is hidden behind a hamburger button; on tablet+
+//        it stays inline.
 
 import React, { useEffect, useState } from "react";
 import { SessionList } from "./components/SessionList.js";
@@ -23,6 +26,15 @@ export function App(): JSX.Element {
 
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Auto-close the mobile drawer whenever the active session changes.
+  // The SessionList component fires this by changing the active id;
+  // we listen here so the close happens regardless of how the switch
+  // occurred (drawer click, switcher modal, etc).
+  useEffect(() => {
+    setDrawerOpen(false);
+  }, [activeSessionId]);
 
   useEffect(() => {
     void loadSessions();
@@ -44,17 +56,27 @@ export function App(): JSX.Element {
     }
     setSwitcherOpen(false);
     setSettingsOpen(false);
+    setDrawerOpen(false);
   });
 
   return (
     <div className="cw-app">
       <header className="cw-header">
+        <button
+          className="cw-menu-trigger"
+          onClick={() => setDrawerOpen(true)}
+          aria-label="Open sessions"
+          title="Sessions"
+        >
+          ☰
+        </button>
         <span className="cw-brand">ComputerWorks</span>
         <span className="cw-spacer" />
         <button
           className="cw-switcher-trigger"
           onClick={() => setSwitcherOpen(true)}
           title={`Switch session (${shortcutLabel("switch-session")})`}
+          aria-label="Switch session"
         >
           ⌕
         </button>
@@ -62,13 +84,14 @@ export function App(): JSX.Element {
           className="cw-settings-trigger"
           onClick={() => setSettingsOpen(true)}
           title={`Settings (${shortcutLabel("open-settings")})`}
+          aria-label="Settings"
         >
           ⚙
         </button>
         <ThemeToggle />
       </header>
       <main className="cw-main">
-        <SessionList />
+        <SessionList open={drawerOpen} onClose={() => setDrawerOpen(false)} />
         <section className="cw-chat-pane">
           {activeSessionId ? (
             <>
@@ -82,6 +105,13 @@ export function App(): JSX.Element {
           )}
         </section>
       </main>
+      {drawerOpen && (
+        <div
+          className="cw-drawer-backdrop"
+          onClick={() => setDrawerOpen(false)}
+          aria-hidden="true"
+        />
+      )}
       {errorMessage && (
         <div role="alert" className="cw-error-banner">
           {errorMessage}

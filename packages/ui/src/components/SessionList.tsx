@@ -1,6 +1,9 @@
 // packages/ui/src/components/SessionList.tsx
 // T7.4 — Sidebar that lists sessions and lets the user create, rename,
 // delete, and switch between them.
+// T10 — Becomes a slide-in drawer on mobile (controlled by `open`).
+//        On tablet+ the `open` prop is ignored and the sidebar renders
+//        inline (see global.css `@media (min-width: 768px)`).
 
 import React, { useEffect, useState } from "react";
 import { useSessionsStore } from "../store/sessions.js";
@@ -80,7 +83,13 @@ function Row(props: RowProps): JSX.Element {
   );
 }
 
-export function SessionList(): JSX.Element {
+interface SessionListProps {
+  /** Mobile drawer open state. Ignored on tablet+ where the sidebar is inline. */
+  open: boolean;
+  onClose: () => void;
+}
+
+export function SessionList({ open, onClose }: SessionListProps): JSX.Element {
   const sessions = useSessionsStore((s) => s.sessions);
   const activeId = useSessionsStore((s) => s.activeSessionId);
   const initialized = useSessionsStore((s) => s.initialized);
@@ -96,8 +105,22 @@ export function SessionList(): JSX.Element {
     }
   }, [initialized, loadSessions]);
 
+  // Close on Escape (drawer mode).
+  useEffect(() => {
+    if (!open) return;
+    function onKey(ev: KeyboardEvent): void {
+      if (ev.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
   return (
-    <aside className="cw-sidebar" aria-label="Sessions">
+    <aside
+      className={`cw-sidebar ${open ? "open" : ""}`}
+      aria-label="Sessions"
+      aria-hidden={!open}
+    >
       <div className="cw-sidebar-header">
         <h2>Sessions</h2>
         <button
@@ -108,6 +131,13 @@ export function SessionList(): JSX.Element {
           aria-label="New session"
         >
           + New
+        </button>
+        <button
+          className="cw-drawer-close"
+          onClick={onClose}
+          aria-label="Close sessions"
+        >
+          ✕
         </button>
       </div>
       <ul className="cw-session-list">
@@ -123,6 +153,10 @@ export function SessionList(): JSX.Element {
             active={s.id === activeId}
             onSelect={() => {
               void switchSession(s.id);
+              // App.tsx also auto-closes on activeSessionId change,
+              // but doing it here too means the drawer closes even if
+              // the active id was already this one (no-op switch).
+              onClose();
             }}
             onRename={(title) => {
               void renameSession(s.id, title);
