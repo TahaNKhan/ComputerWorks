@@ -290,7 +290,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
   - **Deps**: T0.2
   - **Done when**: `bun run --filter @computerworks/ui dev` starts
     the Vite dev server with a placeholder page
-- [ ] T7.2 — API client and types #phase7 @ready target:phase7
+- [x] T7.2 — API client and types #phase7 @ready target:phase7 _done:2026-06-25
   - **Files**: `packages/ui/src/api/client.ts`,
     `packages/ui/src/api/types.ts`
   - **Deps**: T7.1
