@@ -37,6 +37,10 @@
     "packages/memory-files": {
       "name": "@computerworks/memory-files",
       "version": "0.0.1",
+      "dependencies": {
+        "@computerworks/core": "workspace:*",
+        "zod": "^3.23.8",
+      },
       "devDependencies": {
         "@types/bun": "^1.1.13",
         "@types/node": "^22.7.5",
@@ -55,6 +59,10 @@
     "packages/tools-files": {
       "name": "@computerworks/tools-files",
       "version": "0.0.1",
+      "dependencies": {
+        "@computerworks/core": "workspace:*",
+        "zod": "^3.23.8",
+      },
       "devDependencies": {
         "@types/bun": "^1.1.13",
         "@types/node": "^22.7.5",
@@ -64,6 +72,10 @@
     "packages/tools-shell": {
       "name": "@computerworks/tools-shell",
       "version": "0.0.1",
+      "dependencies": {
+        "@computerworks/core": "workspace:*",
+        "zod": "^3.23.8",
+      },
       "devDependencies": {
         "@types/bun": "^1.1.13",
         "@types/node": "^22.7.5",
