@@ -13,8 +13,8 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --noEmit",
-    "start": "bun run src/start.ts",
-    "start:dev": "bun run --watch src/start.ts"
+    "start": "bun --env-file=.env run src/start.ts",
+    "start:dev": "bun --env-file=.env run --watch src/start.ts"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

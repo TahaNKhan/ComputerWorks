@@ -56,20 +56,20 @@ const regexLiteral = z.union([
 
 export const ConfigSchema = z.object({
   providers: z
-    .object({
-      anthropic: z
-        .object({
-          apiKey: z.string().min(1).optional(),
-          baseUrl: z.string().url().default("https://api.anthropic.com"),
-          defaultModel: z.string().default("claude-sonnet-4-6"),
-          betaHeaders: z.array(z.string()).default([]),
-          extraHeaders: z.record(z.string()).default({}),
-          maxTokens: z.number().int().positive().optional(),
-          temperature: z.number().min(0).max(2).optional(),
-        })
-        .default({}),
-    })
-    .default({}),
+      .object({
+        anthropic: z
+          .object({
+            apiKey: z.string().optional(),
+            baseUrl: z.string().url().default("https://api.minimax.io/anthropic"),
+            defaultModel: z.string().default("MiniMax-M3"),
+            betaHeaders: z.array(z.string()).default([]),
+            extraHeaders: z.record(z.string()).default({}),
+            maxTokens: z.number().int().positive().optional(),
+            temperature: z.number().min(0).max(2).optional(),
+          })
+          .default({}),
+      })
+      .default({}),
   defaultProvider: z.literal("anthropic").default("anthropic"),
   server: z
     .object({

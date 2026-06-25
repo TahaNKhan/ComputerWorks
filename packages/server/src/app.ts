@@ -44,8 +44,11 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
   await app.register(cors, {
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
-      const allow = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
-      if (allow.test(origin)) return cb(null, true);
+      const allow = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+      // Also allow private LAN ranges (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+      // — only enabled when the server is bound to a non-loopback host.
+      const lan = /^https?:\/\/(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/;
+      if (allow.test(origin) || lan.test(origin)) return cb(null, true);
       cb(new Error("CORS: origin not allowed"), false);
     },
     credentials: true,

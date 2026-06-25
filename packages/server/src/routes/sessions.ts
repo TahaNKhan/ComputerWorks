@@ -19,7 +19,7 @@ const CreateBody = z.object({
   title: z.string().optional(),
 }).transform((b) => ({
   cwd: b.cwd ?? process.cwd(),
-  model: b.model ?? "claude-sonnet-4-6",
+  model: b.model ?? process.env.MINIMAX_DEFAULT_MODEL ?? "MiniMax-M3",
   title: b.title,
 }));
 
