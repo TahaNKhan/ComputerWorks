@@ -1,0 +1,78 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "computerworks",
+      "devDependencies": {
+        "typescript": "^5.6.3",
+      },
+    },
+    "packages/agent": {
+      "name": "@computerworks/agent",
+      "version": "0.0.1",
+      "devDependencies": {
+        "typescript": "^5.6.3",
+      },
+    },
+    "packages/core": {
+      "name": "@computerworks/core",
+      "version": "0.0.1",
+      "devDependencies": {
+        "typescript": "^5.6.3",
+      },
+    },
+    "packages/memory-files": {
+      "name": "@computerworks/memory-files",
+      "version": "0.0.1",
+      "devDependencies": {
+        "typescript": "^5.6.3",
+      },
+    },
+    "packages/server": {
+      "name": "@computerworks/server",
+      "version": "0.0.1",
+      "devDependencies": {
+        "typescript": "^5.6.3",
+      },
+    },
+    "packages/tools-files": {
+      "name": "@computerworks/tools-files",
+      "version": "0.0.1",
+      "devDependencies": {
+        "typescript": "^5.6.3",
+      },
+    },
+    "packages/tools-shell": {
+      "name": "@computerworks/tools-shell",
+      "version": "0.0.1",
+      "devDependencies": {
+        "typescript": "^5.6.3",
+      },
+    },
+    "packages/ui": {
+      "name": "@computerworks/ui",
+      "version": "0.0.1",
+      "devDependencies": {
+        "typescript": "^5.6.3",
+      },
+    },
+  },
+  "packages": {
+    "@computerworks/agent": ["@computerworks/agent@workspace:packages/agent"],
+
+    "@computerworks/core": ["@computerworks/core@workspace:packages/core"],
+
+    "@computerworks/memory-files": ["@computerworks/memory-files@workspace:packages/memory-files"],
+
+    "@computerworks/server": ["@computerworks/server@workspace:packages/server"],
+
+    "@computerworks/tools-files": ["@computerworks/tools-files@workspace:packages/tools-files"],
+
+    "@computerworks/tools-shell": ["@computerworks/tools-shell@workspace:packages/tools-shell"],
+
+    "@computerworks/ui": ["@computerworks/ui@workspace:packages/ui"],
+
+    "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
+  }
+}

@@ -1,0 +1,11 @@
+[install]
+# Pin exact versions in lockfile; peer-dep resolution can be strict
+exact = false
+
+[test]
+# Use bun's built-in test runner; preload any global test helpers here.
+# preload = []
+
+[run]
+# `bun run` reads scripts as ESM by default in this workspace
+bun = true
