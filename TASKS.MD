@@ -285,7 +285,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
 
 ### Phase 7 — UI 🖥️
 
-- [ ] T7.1 — Vite + React scaffold #phase7 @ready target:phase7
+- [x] T7.1 — Vite + React scaffold #phase7 @ready target:phase7 _done:2026-06-25
   - **Files**: `packages/ui/`, `packages/ui/vite.config.ts`
   - **Deps**: T0.2
   - **Done when**: `bun run --filter @computerworks/ui dev` starts

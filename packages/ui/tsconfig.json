@@ -5,21 +5,29 @@
     "outDir": "dist",
     "tsBuildInfoFile": "./dist/.tsbuildinfo",
     "composite": true,
-    "types": [
-      "bun",
-      "node"
-    ],
+    "jsx": "react-jsx",
     "lib": [
       "ES2022",
-      "DOM"
-    ]
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "vite/client"
+    ],
+    "paths": {
+      "@computerworks/core": ["../core/src/index.ts"],
+      "@computerworks/core/*": ["../core/src/*"]
+    }
   },
   "include": [
     "src/**/*"
   ],
   "exclude": [
     "dist",
+    "dist-app",
     "node_modules",
-    "**/*.test.ts"
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "vite.config.ts"
   ]
 }
