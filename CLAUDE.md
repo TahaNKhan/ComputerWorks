@@ -52,9 +52,9 @@ pushes. Do not bypass it.
 
 ## Phase status (check TASKS.MD for details)
 
-- ✅ Phases 0–6 done and pushed to main
-- 👉 Phase 7: UI (Vite + React SPA)
-- Future: Phase 8 (E2E verification)
+- ✅ Phases 0–7 done on `phase/7-ui` (awaiting merge)
+- 👉 Phase 8: End-to-end verification (E2E smoke + UI checklist + README)
+- Future: post-Phase 8 polish
 
 ## CRITICAL: How to update TASKS.MD
 
