@@ -381,6 +381,13 @@ LAN device got `401 Invalid bearer token` from MiniMax because three config defa
 - [x] T9.1 — Fix MiniMax auth (default model + baseUrl + apiKey) + .env file support #phase9
       _done:2026-06-25 — commit `041c0aa` on `phase/9-minimax-auth`
 
+### Phase 10 — Mobile-friendly UI (LAN deployment followup)
+
+User opened the UI on a phone and the three-pane layout was unusable. Pure CSS + component pass — no new deps, no state restructure.
+
+- [x] T10.1 — Mobile breakpoints + responsive layout #phase10 _done:2026-06-25
+      Mobile-first CSS: <768px single pane (chat only) with sidebar as a slide-in drawer behind a hamburger; >=768px inline sidebar + chat (2 panes); >=1024px full 3-pane layout. Sticky composer with safe-area-inset padding, 44px tap targets, 16px base font (no iOS zoom-on-focus), ApprovalCard buttons stacked vertically on mobile.
+
 ## Gates (run continuously)
 
 - [ ] Typecheck gate #gates @ready — every PR (or every push) runs

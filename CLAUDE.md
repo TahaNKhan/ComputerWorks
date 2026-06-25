@@ -54,6 +54,7 @@ pushes. Do not bypass it.
 
 - ✅ Phases 0–8 done and pushed to main
 - ✅ Phase 9 — MiniMax auth fix (LAN deployment followup) done on `phase/9-minimax-auth`
+- ✅ Phase 10 — Mobile-friendly UI (LAN deployment followup) done on `phase/10-mobile-friendly`
 - 🎉 Build complete — no further phases planned
 
 ## CRITICAL: How to update TASKS.MD
