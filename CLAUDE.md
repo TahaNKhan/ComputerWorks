@@ -154,12 +154,16 @@ without making progress. Burn rate is the user's money.
 
 ## Environment notes (for the assistant calling Claude)
 
-- Use `claude --bare -p --model claude-sonnet-4-6 --output-format json
-  --max-turns 30 --max-budget-usd 5.00 --allowedTools "Read,Edit,Write,Bash" --prompt "<prompt>"`.
+- Use `claude --bare -p --output-format json --max-turns 30
+  --max-budget-usd 5.00 --allowedTools "Read,Edit,Write,Bash" --prompt "<prompt>"`.
   `--bare` skips CLAUDE.md auto-discovery so we MUST pass context via
   `--append-system-prompt` or by writing CLAUDE.md first (we do — it's
   this file).
-- Without `--model`, Claude Code picks up `ANTHROPIC_BASE_URL` and may
-  route to MiniMax or wherever — set the model explicitly.
+- **Do NOT pass `--model`.** The user's `~/.claude/settings.json`
+  pins the model to `MiniMax-M3` (via `ANTHROPIC_MODEL` +
+  `ANTHROPIC_DEFAULT_*_MODEL`). Override that with `--model` and you
+  bypass the user's preference. Just let `--bare` pick up the env.
 - Budget of $5 is enough for a phase-sized task. If you need more,
   bump it; the user is watching.
+- The reported `modelUsage` key will be `MiniMax-M3`. That is correct
+  and intentional — do not flag it as an error.
