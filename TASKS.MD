@@ -297,7 +297,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
   - **Done when**: typed `fetch` wrappers for every REST route and
     a `SSEClient` that yields `ServerEvent`. Reconnect on
     disconnect.
-- [ ] T7.3 — Session store (zustand) #phase7 @ready target:phase7
+- [x] T7.3 — Session store (zustand) #phase7 @ready target:phase7 _done:2026-06-25
   - **Files**: `packages/ui/src/store/sessions.ts`
   - **Deps**: T7.2
   - **Done when**: state holds the session list, the active
