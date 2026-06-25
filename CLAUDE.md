@@ -52,8 +52,7 @@ pushes. Do not bypass it.
 
 ## Phase status (check TASKS.MD for details)
 
-- ✅ Phases 0–7 done and pushed to main
-- 👉 Phase 8: End-to-end verification (E2E smoke + UI checklist + README)
+- ✅ Phases 0–8 done; phase/8-e2e pushed (pending merge to main)
 - Future: post-Phase 8 polish
 
 ## CRITICAL: How to update TASKS.MD
