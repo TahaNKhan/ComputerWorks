@@ -1,41 +1,70 @@
 // packages/ui/src/App.tsx
-// T7.4 — Three-pane layout (sidebar | chat | composer).
-//
-// T7.6 — also subscribes to the SSE stream for the active session.
-//
-// The header hosts a model picker (T7.10) and theme toggle. T7.5–T7.10
-// add more pieces; this file is the composition root.
+// Composition root. Wires the layout, the SSE subscription, and the
+// global keyboard shortcuts (Cmd/Ctrl+K session switcher,
+// Cmd/Ctrl+, settings, Esc cancel).
 
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { SessionList } from "./components/SessionList.js";
 import { ChatView } from "./components/ChatView.js";
 import { Composer } from "./components/Composer.js";
 import { ThemeToggle } from "./components/ThemeToggle.js";
+import { Settings } from "./components/Settings.js";
+import { SessionSwitcher } from "./components/SessionSwitcher.js";
 import { useSessionsStore } from "./store/sessions.js";
 import { subscribeToSession } from "./store/stream.js";
+import { useShortcut, shortcutLabel } from "./lib/shortcuts.js";
 
 export function App(): JSX.Element {
   const errorMessage = useSessionsStore((s) => s.errorMessage);
   const loadSessions = useSessionsStore((s) => s.loadSessions);
   const activeSessionId = useSessionsStore((s) => s.activeSessionId);
+  const status = useSessionsStore((s) => s.status);
+  const cancelTurn = useSessionsStore((s) => s.cancelTurn);
+
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     void loadSessions();
   }, [loadSessions]);
 
-  // T7.6 — Open (or replace) the SSE stream whenever the active
-  // session changes. We tear it down on unmount or session change.
+  // SSE: open (or replace) the stream whenever the active session changes.
   useEffect(() => {
     if (!activeSessionId) return;
     const ctrl = subscribeToSession(activeSessionId);
     return () => ctrl.stop();
   }, [activeSessionId]);
 
+  // Global shortcuts.
+  useShortcut("switch-session", () => setSwitcherOpen(true));
+  useShortcut("open-settings", () => setSettingsOpen(true));
+  useShortcut("cancel", () => {
+    if (activeSessionId && (status === "streaming" || status === "connecting" || status === "awaiting-approval")) {
+      void cancelTurn(activeSessionId);
+    }
+    setSwitcherOpen(false);
+    setSettingsOpen(false);
+  });
+
   return (
     <div className="cw-app">
       <header className="cw-header">
         <span className="cw-brand">ComputerWorks</span>
         <span className="cw-spacer" />
+        <button
+          className="cw-switcher-trigger"
+          onClick={() => setSwitcherOpen(true)}
+          title={`Switch session (${shortcutLabel("switch-session")})`}
+        >
+          ⌕
+        </button>
+        <button
+          className="cw-settings-trigger"
+          onClick={() => setSettingsOpen(true)}
+          title={`Settings (${shortcutLabel("open-settings")})`}
+        >
+          ⚙
+        </button>
         <ThemeToggle />
       </header>
       <main className="cw-main">
@@ -58,6 +87,8 @@ export function App(): JSX.Element {
           {errorMessage}
         </div>
       )}
+      <SessionSwitcher open={switcherOpen} onClose={() => setSwitcherOpen(false)} />
+      <Settings open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }

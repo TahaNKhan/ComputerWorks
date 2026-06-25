@@ -1,6 +1,9 @@
 // packages/ui/src/components/ThemeToggle.tsx
-// T7.10 — Light/dark theme toggle (placed early so the T7.4 layout
-// compiles; full behavior arrives in T7.10).
+// T7.10 — Light/dark theme toggle.
+//
+// Resolves the initial value from `localStorage("cw-theme")` and
+// falls back to `prefers-color-scheme`. The chosen theme is applied
+// to `<html data-theme="...">` so CSS variables can switch.
 
 import React, { useEffect, useState } from "react";
 
@@ -29,6 +32,7 @@ export function ThemeToggle(): JSX.Element {
     <button
       className="cw-theme-toggle"
       aria-label="Toggle theme"
+      title={`Switch to ${theme === "light" ? "dark" : "light"} theme`}
       onClick={() => setTheme(theme === "light" ? "dark" : "light")}
     >
       {theme === "dark" ? "☾" : "☀"}

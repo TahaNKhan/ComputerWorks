@@ -342,7 +342,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
     appears inline; Approve / Reject / Edit-and-approve buttons
     POST to `/api/sessions/:id/approve`; the agent continues
     after a decision
-- [ ] T7.10 — Polish: themes, shortcuts, settings #phase7 @ready target:phase7
+- [x] T7.10 — Polish: themes, shortcuts, settings #phase7 @ready target:phase7 _done:2026-06-25
   - **Files**: `packages/ui/src/components/ThemeToggle.tsx`,
     `packages/ui/src/lib/shortcuts.ts`,
     `packages/ui/src/styles/global.css`

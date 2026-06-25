@@ -566,6 +566,108 @@ input, textarea {
   color: var(--error);
 }
 
+/* ─── Modals (T7.10) ──────────────────────────────────────────── */
+
+.cw-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: grid;
+  place-items: center;
+  z-index: 1000;
+}
+
+.cw-modal {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  min-width: 400px;
+  max-width: 540px;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+.cw-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cw-modal-header h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.cw-modal-body {
+  padding: 14px;
+  min-height: 80px;
+}
+
+.cw-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.cw-modal .cw-primary {
+  background: var(--accent);
+  color: white;
+  border-color: transparent;
+}
+
+.cw-field {
+  display: grid;
+  gap: 4px;
+}
+
+.cw-field-help {
+  margin: 4px 0 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.cw-error {
+  margin-top: 8px;
+  color: var(--error);
+  font-size: 12px;
+}
+
+/* ─── Session switcher (T7.10) ────────────────────────────────── */
+
+.cw-modal-switcher {
+  min-width: 480px;
+}
+
+.cw-switcher-input {
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  font-size: 14px;
+  background: transparent;
+}
+
+.cw-switcher-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.cw-switcher-trigger,
+.cw-settings-trigger {
+  padding: 4px 10px;
+  font-size: 14px;
+  line-height: 1;
+}
+
 .cw-theme-toggle {
   padding: 4px 10px;
   font-size: 14px;
