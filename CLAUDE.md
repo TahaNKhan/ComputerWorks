@@ -53,6 +53,7 @@ pushes. Do not bypass it.
 ## Phase status (check TASKS.MD for details)
 
 - ✅ Phases 0–8 done and pushed to main
+- ✅ Phase 9 — MiniMax auth fix (LAN deployment followup) done on `phase/9-minimax-auth`
 - 🎉 Build complete — no further phases planned
 
 ## CRITICAL: How to update TASKS.MD

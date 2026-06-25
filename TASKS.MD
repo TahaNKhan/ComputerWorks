@@ -374,6 +374,15 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
     sections
  (run continuously)
 
+### Phase 9 — MiniMax auth fix (LAN deployment followup)
+
+LAN device got `401 Invalid bearer token` from MiniMax because three config defaults pointed at real Anthropic. Root-caused and fixed on `phase/9-minimax-auth`.
+
+- [x] T9.1 — Fix MiniMax auth (default model + baseUrl + apiKey) + .env file support #phase9
+      _done:2026-06-25 — commit `041c0aa` on `phase/9-minimax-auth`
+
+## Gates (run continuously)
+
 - [ ] Typecheck gate #gates @ready — every PR (or every push) runs
   `bun run typecheck` and `bun test`; both must pass.
 - [ ] Lint gate #gates @ready — `eslint` with `@typescript-eslint`
