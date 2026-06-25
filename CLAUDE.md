@@ -52,7 +52,7 @@ pushes. Do not bypass it.
 
 ## Phase status (check TASKS.MD for details)
 
-- ✅ Phases 0–7 done on `phase/7-ui` (awaiting merge)
+- ✅ Phases 0–7 done and pushed to main
 - 👉 Phase 8: End-to-end verification (E2E smoke + UI checklist + README)
 - Future: post-Phase 8 polish
 
