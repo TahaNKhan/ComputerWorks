@@ -330,7 +330,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
   - **Done when**: GFM markdown renders with tables, task lists,
     strikethrough, autolinks; code blocks are syntax-highlighted
     via `shiki`; raw HTML is sanitized; inline code is copy-on-click
-- [ ] T7.8 — Tool call rendering #phase7 @ready target:phase7
+- [x] T7.8 — Tool call rendering #phase7 @ready target:phase7 _done:2026-06-25
   - **Files**: `packages/ui/src/components/ToolCallBlock.tsx`
   - **Deps**: T7.6
   - **Done when**: shell output and file diffs render as
