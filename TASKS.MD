@@ -392,7 +392,7 @@ User opened the UI on a phone and the three-pane layout was unusable. Pure CSS +
 
 User noticed the session transcript (messages.jsonl) only contains the user message — assistant text, tool calls, and tool results stayed in the agent loop's in-memory `history` and were lost on reload. SSE consumers saw them in the stream, but `GET /api/sessions/:id` returned just the user turn.
 
-- [ ] T11.1 — Persist assistant + tool messages after runTurn #phase11 @ready target:phase11
+- [x] T11.1 — Persist assistant + tool messages after runTurn #phase11 @ready target:phase11 _done:2026-06-25
   - **Files**: `packages/server/src/routes/messages.ts`,
     `packages/agent/src/loop.ts`,
     `packages/server/src/app.test.ts`
