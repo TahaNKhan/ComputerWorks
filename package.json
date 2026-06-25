@@ -10,6 +10,7 @@
     "build": "tsc -b tsconfig.build.json",
     "build:clean": "rm -rf packages/*/dist && bun run build",
     "test": "bun test",
+    "test:e2e": "bun run scripts/e2e.ts",
     "typecheck": "tsc -b tsconfig.build.json",
     "lint": "echo 'lint not configured yet'",
     "start": "bun run --filter @computerworks/server start"

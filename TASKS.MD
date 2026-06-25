@@ -354,7 +354,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
 
 ### Phase 8 — End-to-end verification 🧪
 
-- [ ] T8.1 — E2E smoke script #phase8 @ready target:phase8
+- [x] T8.1 — E2E smoke script #phase8 @ready target:phase8 _done:2026-06-25
   - **Files**: `scripts/e2e.ts`
   - **Deps**: all of Phase 5
   - **Done when**: starts the server on an ephemeral port with

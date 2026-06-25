@@ -5,6 +5,9 @@ exact = false
 [test]
 # Use bun's built-in test runner; preload any global test helpers here.
 # preload = []
+# scripts/e2e.ts is a standalone smoke runner; do not let `bun test`
+# try to discover and execute it as a unit test file.
+exclude = ["scripts"]
 
 [run]
 # `bun run` reads scripts as ESM by default in this workspace

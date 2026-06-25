@@ -26,6 +26,12 @@ export interface BuildAppOptions {
   registry?: SessionRegistry;
   approvers?: ApproverRegistry;
   createProvider?: RunAgentDeps["createProvider"];
+  /**
+   * If true, the messages route installs an AutoApprover (instead of an
+   * InteractiveApprover) that approves every tool call. Used by the E2E
+   * smoke test and headless runs.
+   */
+  autoApprove?: boolean;
 }
 
 export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> {
@@ -76,7 +82,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
     ),
   };
 
-  await registerMessagesRoute(app, agentDeps);
+  await registerMessagesRoute(app, agentDeps, { autoApprove: opts.autoApprove ?? false });
   await registerStreamRoute(app, sse);
   await registerApproveRoute(app, approvers);
   await registerCancelRoute(app, registry);

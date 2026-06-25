@@ -10,7 +10,7 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { z } from "zod";
-import { runTurn } from "@computerworks/agent";
+import { runTurn, AutoApprover, type Approver } from "@computerworks/agent";
 import type {
   Message, Provider, ProviderOverrides, ToolDefinition,
 } from "@computerworks/core";
@@ -62,6 +62,7 @@ export async function runAgentForSession(
   sessionId: string,
   userContent: string,
   perRequestOverrides?: ProviderOverrides,
+  options: { autoApprove?: boolean } = {},
 ): Promise<number> {
   const start = deps.registry.startIfIdle(sessionId);
   if (start.busy) {
@@ -98,10 +99,16 @@ export async function runAgentForSession(
     const history: Message[] = [];
     for await (const m of deps.store.readMessages(sessionId)) history.push(m);
 
-    const approver = new InteractiveApprover(deps.sse, sessionId, [], [], {
-      timeoutMs: 5 * 60_000,
-    });
-    deps.approvers.register(approver);
+    let approver: Approver;
+    if (options.autoApprove) {
+      approver = new AutoApprover(() => ({ kind: "approve_once" }));
+    } else {
+      const ia = new InteractiveApprover(deps.sse, sessionId, [], [], {
+        timeoutMs: 5 * 60_000,
+      });
+      approver = ia;
+      deps.approvers.register(ia);
+    }
 
     const toolRegistry = new ToolRegistry();
     for (const t of tools as ToolDefinition[]) toolRegistry.register(t);
@@ -137,7 +144,9 @@ export async function runAgentForSession(
     return eventCount;
   } finally {
     deps.registry.finish(sessionId);
-    deps.approvers.unregister(sessionId);
+    if (!options.autoApprove) {
+      deps.approvers.unregister(sessionId);
+    }
   }
 }
 
@@ -168,6 +177,7 @@ function mapAgentEventToServer(
 export async function registerMessagesRoute(
   app: FastifyInstance,
   deps: RunAgentDeps,
+  options: { autoApprove?: boolean } = {},
 ): Promise<void> {
   app.post("/api/sessions/:id/messages", async (req: FastifyRequest, reply: FastifyReply) => {
     const { id } = req.params as { id: string };
@@ -181,7 +191,7 @@ export async function registerMessagesRoute(
       return reply.code(409).send({ error: "a turn is already in flight" });
     }
 
-    void runAgentForSession(deps, id, parsed.data.content, parsed.data.overrides)
+    void runAgentForSession(deps, id, parsed.data.content, parsed.data.overrides, options)
       .catch((err) => {
         try {
           deps.sse.send(id, { type: "error", message: (err as Error).message });
