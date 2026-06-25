@@ -281,8 +281,6 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
       work
 
 
-## Up next 👉
-
 ### Phase 7 — UI 🖥️
 
 - [x] T7.1 — Vite + React scaffold #phase7 @ready target:phase7 _done:2026-06-25
@@ -383,6 +381,9 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
 - [ ] Dependency hygiene #gates @ready — `bun outdated` reviewed
   before each phase close; no `bun add` of a package with a
   non-MIT/Apache/BSD license without a note in `REQUIREMENTS.MD`.
+
+## Up next 👉
+
 
 ---
 
