@@ -1,0 +1,6 @@
+# TypeScript composite build artifacts (declaration files
+# always emit next to source when composite: true)
+*.d.ts
+*.d.ts.map
+*.js
+*.js.map
