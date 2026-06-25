@@ -1,0 +1,248 @@
+/* packages/ui/src/styles/global.css
+ * T7.4 — Three-pane layout + basic theme variables.
+ *
+ * Layout:
+ *   ┌────────────────────────────────────────────┐
+ *   │ header (brand + theme toggle)              │
+ *   ├──────────┬─────────────────────────────────┤
+ *   │ session  │ chat pane                       │
+ *   │ list     │   ├─ message list               │
+ *   │          │   └─ composer                   │
+ *   └──────────┴─────────────────────────────────┘
+ */
+
+:root {
+  --bg: #f8f8fa;
+  --fg: #1a1a1a;
+  --bg-elev: #ffffff;
+  --border: #e1e4e8;
+  --accent: #2563eb;
+  --muted: #6b7280;
+  --error: #b91c1c;
+  --error-bg: #fee2e2;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+html[data-theme="dark"] {
+  --bg: #0d1117;
+  --fg: #e6edf3;
+  --bg-elev: #161b22;
+  --border: #30363d;
+  --accent: #58a6ff;
+  --muted: #8b949e;
+  --error: #f85149;
+  --error-bg: #2d1216;
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme]) {
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--bg-elev);
+}
+
+input, textarea {
+  font: inherit;
+  color: inherit;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+/* ─── App shell ───────────────────────────────────────────────── */
+
+.cw-app {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100vh;
+}
+
+.cw-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+
+.cw-brand {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.cw-spacer {
+  flex: 1;
+}
+
+.cw-main {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 0;
+}
+
+.cw-chat-pane {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  min-height: 0;
+  background: var(--bg);
+}
+
+.cw-empty {
+  padding: 32px;
+  color: var(--muted);
+}
+
+/* ─── Sidebar / session list ──────────────────────────────────── */
+
+.cw-sidebar {
+  border-right: 1px solid var(--border);
+  background: var(--bg-elev);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+}
+
+.cw-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cw-sidebar-header h2 {
+  margin: 0;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.cw-new-session {
+  font-size: 12px;
+}
+
+.cw-session-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+}
+
+.cw-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid transparent;
+}
+
+.cw-row:hover {
+  background: var(--bg);
+}
+
+.cw-row.active {
+  background: var(--bg);
+  border-left: 3px solid var(--accent);
+  padding-left: 9px;
+}
+
+.cw-row.muted {
+  color: var(--muted);
+  cursor: default;
+}
+
+.cw-row-title {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cw-row-actions {
+  display: none;
+  gap: 4px;
+}
+
+.cw-row:hover .cw-row-actions {
+  display: inline-flex;
+}
+
+.cw-row-actions button {
+  padding: 2px 6px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+/* ─── Error banner ────────────────────────────────────────────── */
+
+.cw-error-banner {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  max-width: 400px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--error-bg);
+  color: var(--error);
+  border: 1px solid var(--error);
+  font-size: 13px;
+  z-index: 100;
+}
+
+/* ─── Placeholder panes (filled out in T7.5+) ─────────────────── */
+
+.cw-chat-view,
+.cw-composer-placeholder {
+  padding: 16px;
+  color: var(--muted);
+}
+
+/* ─── Composer (placeholder) ──────────────────────────────────── */
+
+.cw-composer-placeholder {
+  border-top: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+
+.cw-theme-toggle {
+  padding: 4px 10px;
+  font-size: 14px;
+  line-height: 1;
+}

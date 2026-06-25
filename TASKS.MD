@@ -302,7 +302,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
   - **Deps**: T7.2
   - **Done when**: state holds the session list, the active
     session, its messages, and the in-flight approval request
-- [ ] T7.4 — Three-pane layout and SessionList #phase7 @ready target:phase7
+- [x] T7.4 — Three-pane layout and SessionList #phase7 @ready target:phase7 _done:2026-06-25
   - **Files**: `packages/ui/src/App.tsx`,
     `packages/ui/src/components/SessionList.tsx`
   - **Deps**: T7.3
