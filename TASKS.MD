@@ -361,14 +361,14 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
     `ScriptedProvider` and `AutoApprover`, sends a message,
     consumes the SSE stream, asserts a shell tool was called and
     the transcript was persisted
-- [ ] T8.2 — UI manual smoke checklist #phase8 @ready target:phase8
+- [x] T8.2 — UI manual smoke checklist #phase8 @ready target:phase8 _done:2026-06-25
   - **Files**: `docs/ui-smoke.md`
   - **Deps**: T7.10, T8.1
   - **Done when**: a written checklist (agent runs `ls`, user
     approves, result renders; agent edits a file, user sees the
     diff, approves, sees the result; switching sessions keeps
     state) is checked off in a real browser run
-- [ ] T8.3 — README and quickstart #phase8 @ready target:phase8
+- [x] T8.3 — README and quickstart #phase8 @ready target:phase8 _done:2026-06-25
   - **Files**: `README.md`
   - **Deps**: T6.*, T7.10
   - **Done when**: README has install, run, configure, override
