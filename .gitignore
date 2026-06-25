@@ -15,15 +15,38 @@ build/
 .vscode/
 .idea/
 *.swp
+*~
 
-# Env / secrets
+# ─── Env / secrets ─────────────────────────────────────────────────────────
+# NEVER commit credentials. The Anthropic provider in this repo reads
+# MINIMAX_TOKEN and MINIMAX_BASE_URL from the environment (sourced from
+# ~/.bashrc or your shell rc) — never from a tracked file.
 .env
-.env.local
+.env.*
+!.env.example
+.envrc
+.envrc.*
+.direnv/
+*.pem
+*.key
+*.p12
+*.pfx
 
-# Logs
-*.log
+# Common accidental-secret surfaces
+.claude/
+.cursor/
+.aider*
+.continue/
+*.log.local
 npm-debug.log*
 bun-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
 # Hermes state (between cron runs)
 .hermes-state.json
+
+# Backup / scratch files some editors drop alongside real ones
+*.bak
+*.orig
+*.rej
