@@ -16,7 +16,9 @@ import { dirname, resolve } from "node:path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Server config is read at runtime so we don't need a typed import.
-const serverPort = Number(process.env.CW_SERVER_PORT ?? 8787);
+// Default to 4747 to match the Fastify server's default port.
+// Override with CW_SERVER_PORT=... if you run the server elsewhere.
+const serverPort = Number(process.env.CW_SERVER_PORT ?? 4747);
 
 export default defineConfig({
   plugins: [react()],

@@ -63,8 +63,9 @@ export async function registerSessionRoutes(
     const { id } = req.params as { id: string };
     const meta = await store.get(id);
     if (!meta) return reply.code(404).send({ error: "session not found" });
-    const messages = await store.readMessages(id);
-    const audit = await store.readAudit(id);
+    const messages = await store.getMessages(id);
+    const audit: unknown[] = [];
+    for await (const entry of store.readAudit(id)) audit.push(entry);
     return { meta, messages, audit };
   });
 
