@@ -52,7 +52,7 @@ pushes. Do not bypass it.
 
 ## Phase status (check TASKS.MD for details)
 
-- ✅ Phases 0–6 done. Phase 6 is on `phase/6-cli` branch awaiting merge.
+- ✅ Phases 0–6 done and pushed to main
 - 👉 Phase 7: UI (Vite + React SPA)
 - Future: Phase 8 (E2E verification)
 

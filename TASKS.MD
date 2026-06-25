@@ -258,8 +258,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
   - **Done when**: `POST /api/sessions/:id/cancel` aborts the
     in-flight run via the per-session `AbortController`. Tested.
 
-
-## Up next 👉
+---
 
 ### Phase 6 — CLI 💻
 
@@ -280,6 +279,9 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
       transcript to stdout
     - `computerworks memory ls`, `show <name>`, `edit <name>`
       work
+
+
+## Up next 👉
 
 ### Phase 7 — UI 🖥️
 
@@ -372,10 +374,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
   - **Done when**: README has install, run, configure, override
     the API base URL, write a memory note, and troubleshoot
     sections
-
----
-
-## Cross-cutting tasks (run continuously)
+ (run continuously)
 
 - [ ] Typecheck gate #gates @ready — every PR (or every push) runs
   `bun run typecheck` and `bun test`; both must pass.
@@ -386,6 +385,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
   non-MIT/Apache/BSD license without a note in `REQUIREMENTS.MD`.
 
 ---
+
 
 ## Suggested commit sequence
 
