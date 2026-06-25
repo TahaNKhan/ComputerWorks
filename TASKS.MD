@@ -308,7 +308,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
   - **Deps**: T7.3
   - **Done when**: the layout matches §11.3; the session list
     fetches, creates, deletes, renames, switches sessions
-- [ ] T7.5 — Chat + Composer (no streaming) #phase7 @ready target:phase7
+- [x] T7.5 — Chat + Composer (no streaming) #phase7 @ready target:phase7 _done:2026-06-25
   - **Files**: `packages/ui/src/components/ChatView.tsx`,
     `packages/ui/src/components/MessageList.tsx`,
     `packages/ui/src/components/Composer.tsx`
