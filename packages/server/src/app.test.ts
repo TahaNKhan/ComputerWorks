@@ -215,6 +215,64 @@ describe("messages + stream", () => {
     const all = Buffer.concat(chunks).toString("utf8");
     expect(all).toMatch(/event: (token|tool_call|message_start|done)/);
   });
+
+  it("persists assistant + tool messages to the session transcript", async () => {
+    // scriptedProvider emits: frame 0 = tool_call, frame 1 = text reply.
+    // The agent loop should append: assistant(tool_use), tool(result),
+    // assistant(text) — so the on-disk transcript after a turn is:
+    //   [user, assistant(tool_use), tool(result), assistant(text)]
+    const store = new SessionStore({ root: sessionsRoot });
+    const app = await buildApp({
+      config: { ...baseConfig, server: { ...baseConfig.server!, port: 4747 } },
+      store,
+      createProvider: scriptedProvider,
+      autoApprove: true,
+    });
+
+    const create = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const sessionId = create.json().id;
+
+    const post = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${sessionId}/messages`,
+      payload: { content: "hello" },
+    });
+    expect(post.statusCode).toBe(204);
+
+    // The agent runs in the background; poll until it has written
+    // the full transcript (user + assistant + tool + assistant = 4).
+    const expectedLength = 4;
+    let transcript: Awaited<ReturnType<typeof store.getMessages>> = [];
+    for (let i = 0; i < 100; i++) {
+      transcript = await store.getMessages(sessionId);
+      if (transcript.length >= expectedLength) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(transcript.length).toBe(expectedLength);
+    expect(transcript.map((m) => m.role)).toEqual([
+      "user",
+      "assistant",
+      "tool",
+      "assistant",
+    ]);
+    // Assistant message #1 must carry the tool_use block.
+    const assistantWithTool = transcript[1]!;
+    expect(Array.isArray(assistantWithTool.content)).toBe(true);
+    const blocks1 = assistantWithTool.content as Array<{ type: string; name?: string }>;
+    expect(blocks1.some((b) => b.type === "tool_use" && b.name === "echo")).toBe(true);
+    // Tool message must reference the same call id. The scripted
+    // provider asks for an "echo" tool which isn't in the default
+    // registry, so the executor returns is_error=true — but the
+    // tool_result block itself is still persisted (the bug we're
+    // regressing on).
+    const toolMsg = transcript[2]!;
+    expect(Array.isArray(toolMsg.content)).toBe(true);
+    const blocks2 = toolMsg.content as Array<{ type: string; tool_use_id?: string; is_error?: boolean }>;
+    expect(blocks2.some((b) => b.type === "tool_result" && b.tool_use_id === "c1")).toBe(true);
+    // Final assistant message must be the text reply.
+    const finalAssistant = transcript[3]!;
+    expect(finalAssistant.content).toEqual([{ type: "text", text: "done" }]);
+  });
 });
 
 // ─── T5.8 (cancel) ───────────────────────────────────────────────────────

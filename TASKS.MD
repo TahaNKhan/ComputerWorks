@@ -388,6 +388,32 @@ User opened the UI on a phone and the three-pane layout was unusable. Pure CSS +
 - [x] T10.1 — Mobile breakpoints + responsive layout #phase10 _done:2026-06-25
       Mobile-first CSS: <768px single pane (chat only) with sidebar as a slide-in drawer behind a hamburger; >=768px inline sidebar + chat (2 panes); >=1024px full 3-pane layout. Sticky composer with safe-area-inset padding, 44px tap targets, 16px base font (no iOS zoom-on-focus), ApprovalCard buttons stacked vertically on mobile.
 
+### Phase 11 — Persist LLM responses to transcript
+
+User noticed the session transcript (messages.jsonl) only contains the user message — assistant text, tool calls, and tool results stayed in the agent loop's in-memory `history` and were lost on reload. SSE consumers saw them in the stream, but `GET /api/sessions/:id` returned just the user turn.
+
+- [ ] T11.1 — Persist assistant + tool messages after runTurn #phase11 @ready target:phase11
+  - **Files**: `packages/server/src/routes/messages.ts`,
+    `packages/agent/src/loop.ts`,
+    `packages/server/src/app.test.ts`
+  - **Deps**: none
+  - **Done when**:
+    - After `runTurn` completes (or throws), every new message the
+      loop appended to `history` is also written to
+      `messages.jsonl` via `SessionStore.appendMessage`
+    - The user message itself is still persisted before `runTurn`
+      starts (no double-append)
+    - On provider error: the partial text the LLM streamed before
+      failing is appended to history (so it gets persisted) — the
+      SSE consumer saw it, the on-disk transcript should too
+    - On AbortError: completed iterations are persisted; the
+      in-flight partial is dropped, matching the existing
+      "partial message dropped" loop invariant
+    - Regression test in `app.test.ts` asserts the transcript
+      after a scripted turn contains `[user, assistant(tool_use),
+      tool(tool_result), assistant(text)]` — fails before this
+      fix, passes after
+
 ## Gates (run continuously)
 
 - [ ] Typecheck gate #gates @ready — every PR (or every push) runs

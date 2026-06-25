@@ -177,7 +177,9 @@ export async function runTurn(opts: AgentRunOptions): Promise<Message> {
 
     if (providerError) {
       emit(onEvent, { type: "error", message: providerError });
-      lastFinalMessage = { role: "assistant", content: textAccum };
+      // Append whatever text was streamed before the error so it can be
+      // persisted — the SSE consumer saw it; the on-disk transcript should too.
+      lastFinalMessage = appendAssistant(history, textAccum, []);
       break;
     }
 

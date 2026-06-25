@@ -98,6 +98,9 @@ export async function runAgentForSession(
     // Load prior history (sync via listMessages helper or async iter).
     const history: Message[] = [];
     for await (const m of deps.store.readMessages(sessionId)) history.push(m);
+    // Messages appended by runTurn (assistant text, tool calls, tool
+    // results) start at this index. Everything before is pre-existing.
+    const initialHistoryLength = history.length;
 
     let approver: Approver;
     if (options.autoApprove) {
@@ -114,32 +117,43 @@ export async function runAgentForSession(
     for (const t of tools as ToolDefinition[]) toolRegistry.register(t);
 
     let eventCount = 0;
-    await runTurn({
-      provider,
-      model,
-      system,
-      history,
-      registry: toolRegistry,
-      approver,
-      signal,
-      maxIterations: 25,
-      onEvent: (ev) => {
-        eventCount++;
-        if (ev.type === "tool_result") {
-          void deps.store.appendAudit(sessionId, {
-            ts: new Date().toISOString(),
-            sessionId,
-            callId: ev.call_id,
-            tool: "<unknown>",
-            decision: ev.approved ? "approve_once" : "reject",
-            ...(ev.reason ? { reason: ev.reason } : {}),
-            isError: ev.is_error,
-          });
-        }
-        const se = mapAgentEventToServer(ev);
-        if (se) deps.sse.send(sessionId, se);
-      },
-    });
+    try {
+      await runTurn({
+        provider,
+        model,
+        system,
+        history,
+        registry: toolRegistry,
+        approver,
+        signal,
+        maxIterations: 25,
+        onEvent: (ev) => {
+          eventCount++;
+          if (ev.type === "tool_result") {
+            void deps.store.appendAudit(sessionId, {
+              ts: new Date().toISOString(),
+              sessionId,
+              callId: ev.call_id,
+              tool: "<unknown>",
+              decision: ev.approved ? "approve_once" : "reject",
+              ...(ev.reason ? { reason: ev.reason } : {}),
+              isError: ev.is_error,
+            });
+          }
+          const se = mapAgentEventToServer(ev);
+          if (se) deps.sse.send(sessionId, se);
+        },
+      });
+    } finally {
+      // Persist any messages the loop appended to history (assistant
+      // text, tool_use blocks, tool_results, the terminal assistant
+      // message). On AbortError, completed iterations are still in
+      // history — only the in-flight partial is dropped, by design.
+      const newMessages = history.slice(initialHistoryLength);
+      for (const msg of newMessages) {
+        await deps.store.appendMessage(sessionId, msg);
+      }
+    }
 
     return eventCount;
   } finally {
