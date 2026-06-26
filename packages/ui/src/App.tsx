@@ -37,7 +37,14 @@ export function App(): JSX.Element {
   }, [activeSessionId]);
 
   useEffect(() => {
-    void loadSessions();
+    void loadSessions().then(() => {
+      // T12.1 — After the session list settles, apply `?session=<id>`
+      // so the active session matches the URL. This makes the page
+      // bookmarkable + shareable and lets the browser back button
+      // walk the session history (the popstate bridge in
+      // `store/sessions.ts` does the reverse direction).
+      void useSessionsStore.getState().initFromUrl();
+    });
   }, [loadSessions]);
 
   // SSE: open (or replace) the stream whenever the active session changes.

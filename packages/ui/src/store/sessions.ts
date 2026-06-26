@@ -32,6 +32,11 @@ import type {
   SessionMeta,
   UiMessage,
 } from "../api/types.js";
+import {
+  getSessionFromUrl,
+  setSessionInUrl,
+  subscribeUrlChange,
+} from "../lib/router.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -72,6 +77,25 @@ export interface SessionsState {
   renameSession: (id: string, title: string) => Promise<void>;
   switchSession: (id: string | null) => Promise<void>;
   loadTranscript: (id: string) => Promise<void>;
+
+  /**
+   * T12.1 — Apply the `?session=<id>` query param to local state.
+   *
+   * Behavior:
+   *   - If the URL has a session id and it names a session in the
+   *     already-loaded list, make it the active session (no-op if
+   *     already active). If its transcript hasn't been loaded yet,
+   *     load it.
+   *   - If the URL has a session id but it does NOT match any known
+   *     session, clear the param and surface an error toast — the
+   *     bookmark is stale.
+   *   - If the URL has no session param, do nothing.
+   *
+   * Safe to call before `loadSessions()` resolves: when called early,
+   * we re-run the URL apply after the session list settles (the
+   * typical boot order is `loadSessions` → `initFromUrl`).
+   */
+  initFromUrl: () => Promise<void>;
 
   sendMessage: (sessionId: string, content: string) => Promise<void>;
   cancelTurn: (sessionId: string) => Promise<void>;
@@ -148,6 +172,9 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
         auditBySession: { ...s.auditBySession, [meta.id]: [] },
         errorMessage: null,
       }));
+      // Reflect the new session in the URL so the back button can
+      // return to it and the address bar is shareable.
+      setSessionInUrl(meta.id);
       return meta;
     } catch (err) {
       set({ errorMessage: (err as Error).message ?? "Failed to create session" });
@@ -189,9 +216,43 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
 
   switchSession: async (id) => {
     set({ activeSessionId: id, pendingApproval: null, errorMessage: null });
+    // Keep the URL in sync with the active session so the page is
+    // bookmarkable / shareable and the back button walks the history.
+    setSessionInUrl(id);
     if (id && !get().messagesBySession[id]) {
       await get().loadTranscript(id);
     }
+  },
+
+  initFromUrl: async () => {
+    const urlId = getSessionFromUrl();
+    if (urlId === null) return;
+    // If the session list hasn't been fetched yet, run the URL apply
+    // immediately after it settles. We don't want to start a parallel
+    // fetch — `loadSessions()` is the single source of truth for the
+    // session list, and is called from App.tsx's boot effect.
+    const state = get();
+    if (!state.initialized) {
+      // Poll on a microtask tick until initialized flips. Cheap and
+      // avoids exposing a "promise" of the load via the store.
+      for (let i = 0; i < 200 && !get().initialized; i++) {
+        await Promise.resolve();
+      }
+    }
+    const after = get();
+    const known = after.sessions.some((s) => s.id === urlId);
+    if (!known) {
+      // Stale bookmark — clear it and toast so the user knows.
+      setSessionInUrl(null);
+      set({
+        errorMessage: `Session "${urlId}" not found on this server.`,
+      });
+      return;
+    }
+    if (after.activeSessionId === urlId) return;
+    // Reuse switchSession so transcript loading + URL writes go
+    // through the same path (idempotent on the URL write).
+    await after.switchSession(urlId);
   },
 
   loadTranscript: async (id) => {
@@ -316,6 +377,23 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
     });
   },
 }));
+
+// ─── URL → store bridge (popstate) ─────────────────────────────────────────
+
+// Wire the browser back/forward buttons to the store once at module
+// load. The popstate handler reads the URL via the router helpers and
+// applies it through the same `switchSession` path the UI uses, so the
+// transcript reload behavior is identical to a click-driven switch.
+//
+// We deliberately skip writes to the URL here — `pushState` is what
+// triggers popstate in the first place, so writing the URL again would
+// be a no-op echo. The router helpers already guard `typeof window`,
+// so this is a no-op under bun test or SSR.
+subscribeUrlChange((id) => {
+  const state = useSessionsStore.getState();
+  if (state.activeSessionId === id) return;
+  void state.switchSession(id);
+});
 
 // ─── Reducer-style event merging ──────────────────────────────────────────
 

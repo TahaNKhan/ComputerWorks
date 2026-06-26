@@ -425,7 +425,7 @@ no Fastify SPA-fallback needed). Title gen: fire-and-forget
 LLM call after each turn, skipped when the title is already
 non-empty (so manual renames + titled-on-create survive).
 
-- [ ] T12.1 — Frontend URL sync (activeSessionId ↔ ?session=<id>) #phase12 @ready target:phase12
+- [x] T12.1 — Frontend URL sync (activeSessionId ↔ ?session=<id>) #phase12 @ready target:phase12 _done:2026-06-26
   - **Files**: `packages/ui/src/lib/router.ts` (new),
     `packages/ui/src/main.tsx` (mount the router),
     `packages/ui/src/store/sessions.ts` (write URL on
