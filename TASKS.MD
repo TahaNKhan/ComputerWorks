@@ -474,6 +474,80 @@ User asked for two followups: (1) auto-generate readable session names so the si
     - Tests for the store cover the URL side-effect on the three
       mutating actions (via a stubbed `window.history` + `fetch`)
 
+### Phase 13 — Windows path compatibility (LAN deployment followup)
+
+User opened the repo on Windows and asked to make it work natively (not via WSL). The audit found hardcoded `/tmp`, `/bin/bash`, `vi`, an inverted `COMSPEC` probe in `tools-shell`, POSIX-only test commands, and Unix-only path assertions. Baseline `bun test` was 220 pass / 6 fail / 1 timeout on Windows — every failure was a path/platform issue, not a logic bug.
+
+- [ ] T13.1 — Make production code cross-platform #phase13 @ready target:phase13
+  - **Files**:
+    `packages/tools-shell/src/index.ts`,
+    `packages/server/src/system-prompt.ts`,
+    `packages/server/src/config.ts`,
+    `packages/cli/src/commands/memory.ts`,
+    `packages/memory-files/src/index.ts`,
+    `packages/tools-files/src/path-safety.ts`,
+    `packages/server/src/start.ts`,
+    `packages/cli/src/serve.ts`,
+    `scripts/e2e.ts`
+  - **Deps**: none
+  - **Done when**:
+    - `tools-shell`: PowerShell probe prefers `pwsh` over `powershell.exe`
+      (the existing `COMSPEC` probe was inverted and always picked
+      `powershell.exe`); `bash` resolved via PATH instead of hardcoded
+      `/bin/bash`; kill signal passes `undefined` on Windows so libuv
+      uses `TerminateProcess`
+    - `system-prompt`: shell-safety hints are platform-conditional —
+      PowerShell-flavoured wording on Windows, `ls`/`sh`/`eval`
+      wording on Unix
+    - `config.ts`: `shellDenylist` default adds ~6 Windows destructive
+      patterns (`Remove-Item -Recurse -Force`, `Format-Volume`,
+      `rd /s /q`, `reg delete HKEY`, etc.) alongside the 4 POSIX ones
+    - `cli/commands/memory.ts`: temp-file path uses `os.tmpdir()`;
+      editor fallback is `notepad.exe` on Windows / `vi` on Unix;
+      `homedir()` joined via `node:path.join` instead of literal `/`
+    - `memory-files`: `.md` filter is case-insensitive (so
+      `Foo.MD` files written by external tools on Windows aren't
+      silently skipped); path-escape prefix check lowercases both sides
+      to match Windows' case-insensitive filesystem
+    - `tools-files/path-safety.ts`: literal `"\\"` replaced with
+      `path.sep`
+    - `start.ts` / `serve.ts`: `SIGHUP` handler added alongside
+      `SIGINT`/`SIGTERM` for parity with POSIX shutdown signals
+    - `e2e.ts`: scripted shell command branches on `process.platform`
+  - **Acceptance**: `bun run typecheck && bun test` is at the same
+    baseline on Windows (the 6 test failures are addressed in T13.2)
+- [ ] T13.2 — Make test code cross-platform #phase13 @ready target:phase13
+  - **Files**: every `*.test.ts` that uses `cwd: "/tmp"` or
+    `startsWith("/")` assertions, plus `tools-shell/src/index.test.ts`
+    POSIX-only commands
+  - **Deps**: T13.1
+  - **Done when**:
+    - Every `cwd: "/tmp"` site in test fixtures uses `os.tmpdir()` or
+      a per-test `mkdtempSync` subdirectory
+    - `startsWith("/")` assertions in `config.test.ts` and
+      `session-store.test.ts` use `path.isAbsolute(...)` instead
+    - `expandHome("~/foo/bar").endsWith("foo/bar")` is platform-agnostic
+      via `path.sep`
+    - `tools-shell/src/index.test.ts` `echo to stderr >&2; exit 7`,
+      `sleep N`, `yes A | head -c N` commands branch on
+      `process.platform`
+    - `core/src/secret-leak.test.ts` uses `path.relative(REPO_ROOT, p)`
+      instead of `path.replace(REPO_ROOT + "/", "")`
+    - `tools-files/src/index.test.ts` absolute-path-outside-cwd test
+      uses a Windows-portable absolute path
+    - **Acceptance**: `bun test` is 226 pass / 0 fail on Windows
+- [ ] T13.3 — Update docs for Windows support #phase13 @ready target:phase13
+  - **Files**: `README.md`, `CLAUDE.md`
+  - **Deps**: T13.2
+  - **Done when**:
+    - README "Install" section lists Windows alongside macOS/Linux/WSL
+      and points to System Properties → Environment Variables for env
+      setup
+    - CLAUDE.md "Phase status" reflects Phase 13 done
+    - No new commit references old "Unix-like shell" wording
+  - **Acceptance**: docs-only commit; `bun run typecheck && bun test`
+    unchanged
+
 ## Gates (run continuously)
 
 - [ ] Typecheck gate #gates @ready — every PR (or every push) runs

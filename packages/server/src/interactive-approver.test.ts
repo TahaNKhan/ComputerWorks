@@ -168,7 +168,7 @@ describe("interactive prompt", () => {
   });
 
   it("resolve() with unknown requestId returns false", () => {
-    const approver = makeApprover();
+    const approver = makeApprover({timeoutMs: 300});
     expect(approver.resolveById("nope", { kind: "approve_once" })).toBe(false);
   });
 });

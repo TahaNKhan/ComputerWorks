@@ -291,8 +291,6 @@ export class SSEManager {
         if (set.size === 0) this.subscribers.delete(sessionId);
       }
     }, this.heartbeatMs);
-    // Don't keep the event loop alive just for heartbeats.
-    this.heartbeatTimer.unref?.();
   }
 
   private removeSubscriber(sessionId: string, sub: Subscriber): void {
