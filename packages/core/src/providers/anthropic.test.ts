@@ -237,3 +237,163 @@ describe("createAnthropicProvider", () => {
     expect(cachedCount).toBe(1);
   });
 });
+
+describe("AnthropicProvider.inferText", () => {
+  it("returns concatenated text tokens from the stream", async () => {
+    const calls = installFetchMock([
+      { event: "message_start", data: {
+        type: "message_start",
+        message: {
+          id: "msg_test", type: "message", role: "assistant",
+          content: [], model: "MiniMax-M3",
+          stop_reason: null, stop_sequence: null,
+          usage: { input_tokens: 0, output_tokens: 0 },
+        },
+      }},
+      { event: "content_block_start", data: {
+        type: "content_block_start", index: 0,
+        content_block: { type: "text", text: "" },
+      }},
+      { event: "content_block_delta", data: {
+        type: "content_block_delta", index: 0,
+        delta: { type: "text_delta", text: "hello, " },
+      }},
+      { event: "content_block_delta", data: {
+        type: "content_block_delta", index: 0,
+        delta: { type: "text_delta", text: "world" },
+      }},
+      { event: "content_block_stop", data: { type: "content_block_stop", index: 0 }},
+      { event: "message_stop", data: { type: "message_stop" }},
+    ]);
+
+    const { createAnthropicProvider } = await import("./anthropic.js");
+    const provider = createAnthropicProvider();
+
+    const text = await provider.inferText("say hi");
+    expect(text).toBe("hello, world");
+
+    // Verify the request was shaped like a single user message with no tools.
+    const body = JSON.parse(calls[0]!.init.body as string);
+    expect(body.model).toBe("MiniMax-M3");
+    expect(body.messages).toEqual([{ role: "user", content: [{ type: "text", text: "say hi" }] }]);
+    expect(body.tools).toBeUndefined();
+  });
+
+  it("passes through system, model, maxTokens, temperature overrides", async () => {
+    installFetchMock([
+      { event: "message_start", data: { type: "message_start", message: {
+        id: "msg_test", type: "message", role: "assistant",
+        content: [], model: "MiniMax-M3",
+        stop_reason: null, stop_sequence: null,
+        usage: { input_tokens: 0, output_tokens: 0 },
+      }}},
+      { event: "content_block_start", data: {
+        type: "content_block_start", index: 0,
+        content_block: { type: "text", text: "" },
+      }},
+      { event: "content_block_delta", data: {
+        type: "content_block_delta", index: 0,
+        delta: { type: "text_delta", text: "ok" },
+      }},
+      { event: "content_block_stop", data: { type: "content_block_stop", index: 0 }},
+      { event: "message_stop", data: { type: "message_stop" }},
+    ]);
+
+    const { createAnthropicProvider } = await import("./anthropic.js");
+    const provider = createAnthropicProvider();
+
+    const text = await provider.inferText("summarize", {
+      system: "you are concise",
+      model: "MiniMax-M3-fast",
+      maxTokens: 64,
+      temperature: 0.2,
+    });
+    expect(text).toBe("ok");
+  });
+
+  it("throws on a provider error event", async () => {
+    installFetchMock([
+      { event: "message_start", data: { type: "message_start", message: {
+        id: "msg_test", type: "message", role: "assistant",
+        content: [], model: "MiniMax-M3",
+        stop_reason: null, stop_sequence: null,
+        usage: { input_tokens: 0, output_tokens: 0 },
+      }}},
+      { event: "error", data: {
+        type: "error",
+        error: { type: "api_error", message: "rate limited" },
+      }},
+      { event: "message_stop", data: { type: "message_stop" }},
+    ]);
+
+    const { createAnthropicProvider } = await import("./anthropic.js");
+    const provider = createAnthropicProvider();
+
+    await expect(provider.inferText("ping")).rejects.toThrow(/rate limited/);
+  });
+
+  it("returns empty string when the response has no text tokens", async () => {
+    installFetchMock([
+      { event: "message_start", data: { type: "message_start", message: {
+        id: "msg_test", type: "message", role: "assistant",
+        content: [], model: "MiniMax-M3",
+        stop_reason: null, stop_sequence: null,
+        usage: { input_tokens: 0, output_tokens: 0 },
+      }}},
+      { event: "content_block_start", data: {
+        type: "content_block_start", index: 0,
+        content_block: { type: "text", text: "" },
+      }},
+      { event: "content_block_stop", data: { type: "content_block_stop", index: 0 }},
+      { event: "message_stop", data: { type: "message_stop" }},
+    ]);
+
+    const { createAnthropicProvider } = await import("./anthropic.js");
+    const provider = createAnthropicProvider();
+
+    const text = await provider.inferText("noop");
+    expect(text).toBe("");
+  });
+});
+
+describe("getDefaultAnthropicProvider", () => {
+  it("returns the same instance across calls (lazy singleton)", async () => {
+    const { getDefaultAnthropicProvider, resetDefaultAnthropicProvider } =
+      await import("./anthropic.js");
+    resetDefaultAnthropicProvider();
+    const a = getDefaultAnthropicProvider();
+    const b = getDefaultAnthropicProvider();
+    expect(a).toBe(b);
+  });
+
+  it("rebuilds after resetDefaultAnthropicProvider", async () => {
+    const {
+      getDefaultAnthropicProvider,
+      resetDefaultAnthropicProvider,
+      createAnthropicProvider,
+    } = await import("./anthropic.js");
+    resetDefaultAnthropicProvider();
+    const first = getDefaultAnthropicProvider();
+    resetDefaultAnthropicProvider();
+    const second = getDefaultAnthropicProvider();
+    expect(first).not.toBe(second);
+    // Both still behave like valid AnthropicProvider instances.
+    expect(first.id).toBe("anthropic");
+    expect(second.id).toBe("anthropic");
+  });
+
+  it("reads fresh env after reset (token change picks up on next call)", async () => {
+    const {
+      getDefaultAnthropicProvider,
+      resetDefaultAnthropicProvider,
+    } = await import("./anthropic.js");
+    resetDefaultAnthropicProvider();
+    const a = getDefaultAnthropicProvider();
+    expect(a.resolvedConfig().baseUrl).toBe("https://api.minimax.io/anthropic");
+    setEnv("MINIMAX_BASE_URL", "https://alt.example/anthropic");
+    resetDefaultAnthropicProvider();
+    const b = getDefaultAnthropicProvider();
+    expect(b.resolvedConfig().baseUrl).toBe("https://alt.example/anthropic");
+    setEnv("MINIMAX_BASE_URL", "https://api.minimax.io/anthropic");
+  });
+});

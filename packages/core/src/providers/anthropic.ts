@@ -242,6 +242,34 @@ function withScrubbedAnthropicEnv<T>(fn: () => T): T {
 
 export interface AnthropicProvider extends Provider {
   resolvedConfig(): { baseUrl: string; defaultModel: string; betaHeaders: string[] };
+  /**
+   * One-shot text inference. Sends a single user message and returns the
+   * full text response in one Promise. Internally streams the response
+   * and concatenates tokens. Throws on provider error. Returns "" if
+   * the response contains no text (e.g. only tool_use blocks).
+   *
+   * Use this when you want a single blocking call ("sync" from the
+   * caller's POV) — summarization, classification, intent detection,
+   * etc. For multi-turn, tool-calling, or token-level streaming, use
+   * `chat()` instead.
+   *
+   * The provider is stateless across calls, so `inferText` is safe to
+   * invoke concurrently from multiple callers on the same instance.
+   */
+  inferText(prompt: string, options?: InferTextOptions): Promise<string>;
+}
+
+export interface InferTextOptions {
+  /** Override the system prompt (default: no system prompt). */
+  system?: string;
+  /** Override the model (default: provider's `defaultModel`). */
+  model?: string;
+  /** Max tokens to generate (default: 1024, matches `chat()`). */
+  maxTokens?: number;
+  /** Sampling temperature. */
+  temperature?: number;
+  /** Abort signal for cancellation. */
+  signal?: AbortSignal;
 }
 
 export function createAnthropicProvider(
@@ -376,7 +404,74 @@ export function createAnthropicProvider(
         betaHeaders: [...(defaults.betaHeaders ?? [])],
       };
     },
+    async inferText(
+      prompt: string,
+      options: InferTextOptions = {},
+    ): Promise<string> {
+      const req: ChatRequest = {
+        model: options.model ?? defaults.defaultModel ?? readDefaultModel(),
+        ...(options.system !== undefined ? { system: options.system } : {}),
+        messages: [{ role: "user", content: prompt }],
+        tools: [],
+        ...(options.signal ? { signal: options.signal } : {}),
+        overrides: {
+          ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
+          ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+        },
+      };
+      let text = "";
+      for await (const ev of this.chat(req)) {
+        if (ev.type === "token") {
+          text += ev.delta;
+        } else if (ev.type === "error") {
+          throw new Error(ev.message);
+        }
+        // message_start / tool_call / tool_result / message_done / done
+        // are intentionally ignored — `inferText` only returns text.
+      }
+      return text;
+    },
   };
+}
+
+// ─── Singleton ─────────────────────────────────────────────────────────────
+
+let _defaultProvider: AnthropicProvider | null = null;
+
+/**
+ * Lazily-constructed singleton `AnthropicProvider`, configured from
+ * `process.env` (MINIMAX_TOKEN, MINIMAX_BASE_URL, MINIMAX_DEFAULT_MODEL).
+ *
+ * The instance is stateless across calls — concurrent `chat()` and
+ * `inferText()` invocations are safe. Each call constructs a fresh
+ * Anthropic SDK client internally, so there is no shared mutable state.
+ *
+ * Use this when you want a "just works" provider from anywhere in the
+ * codebase without threading configuration through call sites:
+ *
+ * ```ts
+ * import { getDefaultAnthropicProvider } from "@computerworks/core";
+ * const answer = await getDefaultAnthropicProvider().inferText("What is 2+2?");
+ * ```
+ *
+ * For per-request overrides (different model, base URL, etc.) call
+ * `createAnthropicProvider()` explicitly instead.
+ */
+export function getDefaultAnthropicProvider(): AnthropicProvider {
+  if (_defaultProvider === null) {
+    _defaultProvider = createAnthropicProvider();
+  }
+  return _defaultProvider;
+}
+
+/**
+ * Test helper: clear the cached singleton so the next call to
+ * `getDefaultAnthropicProvider()` builds a fresh one. Use between
+ * tests that mutate `process.env` (MINIMAX_TOKEN, MINIMAX_BASE_URL,
+ * MINIMAX_DEFAULT_MODEL) so the new env is picked up.
+ */
+export function resetDefaultAnthropicProvider(): void {
+  _defaultProvider = null;
 }
 
 function* emitFromSink(
