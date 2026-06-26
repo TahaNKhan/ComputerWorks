@@ -26,6 +26,7 @@
     "bun": ">=1.1.0"
   },
   "dependencies": {
+    "@types/node": "^26.0.1",
     "react": "^18",
     "react-dom": "^18",
     "react-markdown": "^9",

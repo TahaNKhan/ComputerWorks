@@ -5,15 +5,41 @@
 // FastifyInstance and tests use `app.inject()`. We pass in a fake
 // provider factory so no network calls happen.
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdtempSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import type { Provider, ProviderOverrides, StreamEvent, ToolDefinition } from "@computerworks/core";
+import * as realCore from "@computerworks/core";
 import type { Config } from "./config.js";
-import { buildApp } from "./app.js";
-import { SessionStore } from "./session-store.js";
+
+// ─── Mock @computerworks/core for auto-title ──────────────────────────────
+// title.ts calls `getDefaultAnthropicProvider()` to derive a session title
+// via the LLM. We replace that one export with a fake that echoes the
+// cleaned user input back as the title — a deterministic stand-in for
+// the LLM, no network. Everything else from @computerworks/core is
+// re-exported from the static `realCore` snapshot we already loaded, so
+// createAnthropicProvider and the type definitions still resolve.
+//
+// The snapshot has to be taken at top level (Bun hoists the static
+// import), and the factory below only runs when title.ts transitively
+// loads @computerworks/core via the dynamic import of app.js.
+const realCoreSnapshot = { ...realCore };
+
+mock.module("@computerworks/core", () => ({
+  ...realCoreSnapshot,
+  getDefaultAnthropicProvider: () => ({
+    inferText: async (prompt: string): Promise<string> => {
+      const m = prompt.match(/User Input:\s*(.+)$/);
+      return m ? m[1]! : prompt;
+    },
+  }),
+}));
+
+// Dynamic imports below — these run after mock.module() is in place, so
+// title.ts (loaded transitively via app.js) sees the mocked provider.
+const { buildApp } = await import("./app.js");
+const { SessionStore } = await import("./session-store.js");
 
 let sessionsRoot: string;
 let memoryRoot: string;

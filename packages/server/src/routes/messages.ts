@@ -87,7 +87,7 @@ export async function runAgentForSession(
     // agent stream starts, so the sidebar updates in lockstep with
     // the user's send.
     if (!meta.title) {
-      const title = deriveTitle(userContent);
+      const title = await deriveTitle(userContent);
       const updated = await deps.store.patch(sessionId, { title });
       deps.sse.send(sessionId, {
         type: "session_renamed",

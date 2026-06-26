@@ -21,6 +21,8 @@
 // which depends on `now` (defaults to `new Date()`). Tests pass an
 // explicit `now` to keep the assertion stable.
 
+import { getDefaultAnthropicProvider } from "@computerworks/core";
+
 /** Max length of a derived title, not counting the trailing ellipsis. */
 export const TITLE_MAX_LEN = 50;
 
@@ -81,13 +83,20 @@ function formatChatFallback(now: Date): string {
   return `Chat – ${date}`;
 }
 
+async function generateTitle(input: string) {
+  const provider = getDefaultAnthropicProvider();
+  const prompt = `Generate a title for a chat given the following user input, keep it concise, less that ${TITLE_MAX_LEN} characters, do not use quotes just return bare text. User Input: ${input}`;
+  const text = await provider.inferText(prompt);
+  return text;
+}
+
 /**
  * Derive a session title from the first user message.
  *
  * @param content The raw first user message.
  * @param now     Optional clock for the date fallback (testing hook).
  */
-export function deriveTitle(content: string, now: Date = new Date()): string {
+export async function deriveTitle(content: string, now: Date = new Date()): Promise<string> {
   if (typeof content !== "string") return formatChatFallback(now);
 
   // Normalize line endings and split on newlines so a multi-line
@@ -96,7 +105,7 @@ export function deriveTitle(content: string, now: Date = new Date()): string {
   for (const raw of lines) {
     const cleaned = stripMarkdownNoise(raw).replace(/\s+/g, " ").trim();
     if (cleaned.length > 0) {
-      return truncate(cleaned, TITLE_MAX_LEN);
+      return truncate(await generateTitle(cleaned), TITLE_MAX_LEN);
     }
   }
   return formatChatFallback(now);

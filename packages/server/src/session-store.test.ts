@@ -119,6 +119,10 @@ describe("list", () => {
 describe("patch", () => {
   it("renames a session", async () => {
     const m = await store.create({ cwd: "/tmp", model: "m", title: "Old" });
+    // updatedAt is millisecond resolution; a fast box can land both
+    // timestamps in the same ms, making this flake. Bump the clock a
+    // hair between the two calls so they're guaranteed to differ.
+    await new Promise((r) => setTimeout(r, 2));
     const next = await store.patch(m.id, { title: "New" });
     expect(next.title).toBe("New");
     expect(next.updatedAt).not.toBe(m.updatedAt);

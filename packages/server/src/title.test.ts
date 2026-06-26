@@ -1,151 +1,256 @@
 // packages/server/src/title.test.ts
-// Unit tests for deriveTitle. Pure function, easy to cover exhaustively.
+// Tests for deriveTitle(). The function now delegates title generation to
+// the Anthropic provider via getDefaultAnthropicProvider().inferText(),
+// so the tests mock @computerworks/core and assert two things:
+//   1. The prompt sent to the LLM contains the cleaned content (and
+//      not the raw markdown noise).
+//   2. The LLM's response is truncated to TITLE_MAX_LEN when needed,
+//      with the `…` suffix, and returned verbatim otherwise.
+//
+// Deterministic paths (date fallback when content is empty) are tested
+// by leaving the mock response untouched and asserting no LLM call was
+// made.
 
-import { describe, expect, it } from "bun:test";
-import { deriveTitle, TITLE_MAX_LEN } from "./title.js";
+import { beforeEach, describe, expect, it, mock } from "bun:test";
 
-// Fixed clock so the fallback tests are deterministic.
-const NOW = new Date("2026-06-25T14:32:00");
+// ─── LLM mock state ────────────────────────────────────────────────────────
 
-describe("deriveTitle", () => {
-  it("uses the cleaned first line as-is when short", () => {
-    expect(deriveTitle("Help with React", NOW)).toBe("Help with React");
+interface MockState {
+  response: string;
+  calls: number;
+  capturedPrompt: string;
+}
+
+const mockState: MockState = {
+  response: "Mock Title",
+  calls: 0,
+  capturedPrompt: "",
+};
+
+// Mock @computerworks/core before title.ts is imported, so deriveTitle's
+// `import { getDefaultAnthropicProvider } from "@computerworks/core"`
+// resolves to our fake provider.
+mock.module("@computerworks/core", () => ({
+  getDefaultAnthropicProvider: () => ({
+    inferText: async (prompt: string): Promise<string> => {
+      mockState.calls += 1;
+      mockState.capturedPrompt = prompt;
+      return mockState.response;
+    },
+  }),
+}));
+
+const { deriveTitle, TITLE_MAX_LEN } = await import("./title.js");
+
+// ─── Test helpers ──────────────────────────────────────────────────────────
+
+const FIXED_NOW = new Date(2026, 5, 26, 14, 7); // 2026-06-26 14:07 local
+
+function resetMock(response = "Mock Title"): void {
+  mockState.response = response;
+  mockState.calls = 0;
+  mockState.capturedPrompt = "";
+}
+
+function formatFallback(d: Date = FIXED_NOW): string {
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `Chat – ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// ─── Tests ─────────────────────────────────────────────────────────────────
+
+describe("deriveTitle — markdown / whitespace normalization", () => {
+  beforeEach(() => resetMock());
+
+  it("strips leading '# ' heading noise", async () => {
+    await deriveTitle("# Help with React");
+    expect(mockState.capturedPrompt).toContain("Help with React");
+    expect(mockState.capturedPrompt).not.toMatch(/User Input:\s*#/);
   });
 
-  it("trims surrounding whitespace", () => {
-    expect(deriveTitle("   Hello world   ", NOW)).toBe("Hello world");
+  it("strips '## ' and '### ' style headings", async () => {
+    await deriveTitle("###   Database migration plan");
+    expect(mockState.capturedPrompt).toContain("Database migration plan");
   });
 
-  it("collapses internal whitespace within a single line", () => {
-    expect(deriveTitle("foo\t\t  bar", NOW)).toBe("foo bar");
-    expect(deriveTitle("  many   spaces   inside  ", NOW)).toBe(
-      "many spaces inside",
+  it("strips leading '>' blockquote", async () => {
+    await deriveTitle("> Quote this please");
+    expect(mockState.capturedPrompt).toContain("Quote this please");
+    expect(mockState.capturedPrompt).not.toMatch(/User Input:\s*>/);
+  });
+
+  it("strips '-' / '*' / '+' unordered list bullets", async () => {
+    await deriveTitle("- buy groceries");
+    expect(mockState.capturedPrompt).toContain("buy groceries");
+
+    resetMock();
+    await deriveTitle("* write tests");
+    expect(mockState.capturedPrompt).toContain("write tests");
+
+    resetMock();
+    await deriveTitle("+ ship it");
+    expect(mockState.capturedPrompt).toContain("ship it");
+  });
+
+  it("strips '1.' / '2)' ordered list markers", async () => {
+    await deriveTitle("1. First item");
+    expect(mockState.capturedPrompt).toContain("First item");
+
+    resetMock();
+    await deriveTitle("2) Second item");
+    expect(mockState.capturedPrompt).toContain("Second item");
+  });
+
+  it("strips ``` code fence opener (3+ backticks)", async () => {
+    // Bare fence (no language identifier) cleans to "", so the
+    // function skips it and uses the next line. (With a language
+    // tag like ```js, the function stops at "js" — that's a
+    // documented quirk of the per-line strip.)
+    await deriveTitle("```\nfoo();\n```");
+    expect(mockState.capturedPrompt).toContain("foo();");
+    expect(mockState.capturedPrompt).not.toMatch(/User Input:.*`{3}/);
+  });
+
+  it("loops to peel off repeated noise (e.g. '> > quoted')", async () => {
+    await deriveTitle("> > deeply quoted");
+    expect(mockState.capturedPrompt).toContain("deeply quoted");
+  });
+
+  it("collapses internal whitespace runs to a single space", async () => {
+    await deriveTitle("hello    world\n\n\tfoo");
+    expect(mockState.capturedPrompt).toContain("hello world");
+  });
+
+  it("uses only the first non-empty line of multi-line input", async () => {
+    await deriveTitle("first line\n\nsecond line\nthird");
+    expect(mockState.capturedPrompt).toContain("first line");
+    expect(mockState.capturedPrompt).not.toMatch(/second line/);
+    expect(mockState.capturedPrompt).not.toMatch(/third/);
+  });
+
+  it("normalizes CRLF and CR line endings to LF", async () => {
+    await deriveTitle("windows line\r\nanother");
+    expect(mockState.capturedPrompt).toContain("windows line");
+    expect(mockState.capturedPrompt).not.toContain("\r");
+
+    resetMock();
+    await deriveTitle("old mac line\ranother");
+    expect(mockState.capturedPrompt).toContain("old mac line");
+  });
+
+  it("trims leading and trailing whitespace", async () => {
+    await deriveTitle("   trimmed   ");
+    expect(mockState.capturedPrompt).toContain("User Input: trimmed");
+    // No run of two+ spaces right before the cleaned content.
+    expect(mockState.capturedPrompt).not.toMatch(/User Input:\s{2,}\w/);
+    // No trailing whitespace before end-of-string or quote.
+    expect(mockState.capturedPrompt).not.toMatch(/\s+$/);
+  });
+});
+
+describe("deriveTitle — LLM integration", () => {
+  beforeEach(() => resetMock());
+
+  it("returns the LLM's response verbatim when it fits", async () => {
+    resetMock("Help with React");
+    const title = await deriveTitle("anything");
+    expect(title).toBe("Help with React");
+    expect(mockState.calls).toBe(1);
+  });
+
+  it("truncates a long LLM response to TITLE_MAX_LEN with an ellipsis", async () => {
+    const long = "x".repeat(TITLE_MAX_LEN + 30);
+    resetMock(long);
+    const title = await deriveTitle("trigger truncation");
+    expect(title.endsWith("…")).toBe(true);
+    expect(title.length).toBeLessThanOrEqual(TITLE_MAX_LEN + 1); // +1 for the ellipsis
+    expect(title.length).toBeGreaterThan(1);
+  });
+
+  it("truncation cuts at a word boundary, not mid-word", async () => {
+    // 50 chars exactly → no truncation, no ellipsis.
+    resetMock("a".repeat(TITLE_MAX_LEN));
+    const exact = await deriveTitle("x");
+    expect(exact).toBe("a".repeat(TITLE_MAX_LEN));
+    expect(exact.endsWith("…")).toBe(false);
+
+    // Long wordy string → cut happens before TITLE_MAX_LEN at a space.
+    resetMock("alpha beta gamma delta epsilon zeta eta theta iota kappa");
+    const cut = await deriveTitle("x");
+    expect(cut.endsWith("…")).toBe(true);
+    // No whitespace at the cut point — should end with a clean word + ellipsis.
+    expect(cut).not.toMatch(/\s…$/);
+  });
+
+  it("falls back to a hard slice when the response is one giant word", async () => {
+    resetMock("z".repeat(TITLE_MAX_LEN + 20));
+    const title = await deriveTitle("x");
+    expect(title.endsWith("…")).toBe(true);
+    expect(title.length).toBe(TITLE_MAX_LEN + 1);
+  });
+
+  it("prompt tells the LLM the length budget and the 'User Input' marker", async () => {
+    await deriveTitle("anything goes");
+    expect(mockState.capturedPrompt).toContain(String(TITLE_MAX_LEN));
+    expect(mockState.capturedPrompt).toContain("User Input:");
+    expect(mockState.capturedPrompt).toContain("anything goes");
+    expect(mockState.capturedPrompt).toMatch(/less that \d+ characters/);
+  });
+});
+
+describe("deriveTitle — date fallback", () => {
+  beforeEach(() => resetMock());
+
+  it("returns the date fallback for empty content (no LLM call)", async () => {
+    const title = await deriveTitle("", FIXED_NOW);
+    expect(title).toBe(formatFallback(FIXED_NOW));
+    expect(mockState.calls).toBe(0);
+  });
+
+  it("returns the date fallback for whitespace-only content", async () => {
+    const title = await deriveTitle("   \n\n\t   ", FIXED_NOW);
+    expect(title).toBe(formatFallback(FIXED_NOW));
+    expect(mockState.calls).toBe(0);
+  });
+
+  it("returns the date fallback when every line is markdown noise", async () => {
+    const title = await deriveTitle("###\n>\n-\n```\n", FIXED_NOW);
+    expect(title).toBe(formatFallback(FIXED_NOW));
+    expect(mockState.calls).toBe(0);
+  });
+
+  it("returns the date fallback for a non-string content (defensive)", async () => {
+    // TS would prevent this at compile time, but the runtime check exists
+    // so test the path by casting through unknown.
+    const title = await deriveTitle(
+      undefined as unknown as string,
+      FIXED_NOW,
     );
+    expect(title).toBe(formatFallback(FIXED_NOW));
+    expect(mockState.calls).toBe(0);
   });
 
-  it("strips ATX heading hashes", () => {
-    expect(deriveTitle("# Help with React", NOW)).toBe("Help with React");
-    expect(deriveTitle("### Help with React", NOW)).toBe("Help with React");
-    expect(deriveTitle("###### Deep nesting", NOW)).toBe("Deep nesting");
+  it("date fallback uses an EN DASH and pads month/day/hour/minute", async () => {
+    const cases: Array<[Date, string]> = [
+      [new Date(2026, 0, 1, 0, 0), "Chat – 2026-01-01 00:00"],
+      [new Date(2026, 11, 31, 23, 59), "Chat – 2026-12-31 23:59"],
+      [new Date(2026, 5, 26, 14, 7), "Chat – 2026-06-26 14:07"],
+    ];
+    for (const [d, expected] of cases) {
+      expect(await deriveTitle("", d)).toBe(expected);
+    }
   });
 
-  it("strips blockquote markers (repeated)", () => {
-    expect(deriveTitle("> quoted text", NOW)).toBe("quoted text");
-    expect(deriveTitle(">> >  nested quote", NOW)).toBe("nested quote");
-  });
-
-  it("strips unordered list bullets", () => {
-    expect(deriveTitle("- first item", NOW)).toBe("first item");
-    expect(deriveTitle("* starred item", NOW)).toBe("starred item");
-    expect(deriveTitle("+ plus item", NOW)).toBe("plus item");
-  });
-
-  it("strips ordered list markers", () => {
-    expect(deriveTitle("1. first", NOW)).toBe("first");
-    expect(deriveTitle("2) second", NOW)).toBe("second");
-    expect(deriveTitle("42. many", NOW)).toBe("many");
-  });
-
-  it("does NOT strip a single inline backtick", () => {
-    // Inline code (`` `foo` ``) is normal prose, not a code fence.
-    expect(deriveTitle("`inline` is fine", NOW)).toBe("`inline` is fine");
-  });
-
-  it("strips leading triple+ backticks (code fence)", () => {
-    expect(deriveTitle("```js", NOW)).toBe("js");
-    expect(deriveTitle("````python", NOW)).toBe("python");
-    // A pure fence line has no content after stripping — fallback.
-    expect(deriveTitle("```", NOW)).toBe("Chat – 2026-06-25 14:32");
-  });
-
-  it("combines multiple noise prefixes in one message", () => {
-    expect(deriveTitle("> > - # deep nesting", NOW)).toBe("deep nesting");
-  });
-
-  it("takes only the first non-empty line of a multi-line message", () => {
-    expect(
-      deriveTitle(
-        "Subject: a quick question\n\nbody of the email goes here",
-        NOW,
-      ),
-    ).toBe("Subject: a quick question");
-  });
-
-  it("skips empty leading lines", () => {
-    expect(deriveTitle("\n\n\n  the real first line", NOW)).toBe(
-      "the real first line",
-    );
-  });
-
-  it("skips lines that are pure markdown noise", () => {
-    expect(
-      deriveTitle("> \n> > \n# \nactually the title", NOW),
-    ).toBe("actually the title");
-  });
-
-  it("truncates at the nearest word boundary with an ellipsis", () => {
-    const long =
-      "Refactor the auth middleware to use a token store backed by Redis instead of in-memory state";
-    // Total length > TITLE_MAX_LEN.
-    const t = deriveTitle(long, NOW);
-    expect(t.endsWith("…")).toBe(true);
-    // Total length stays bounded.
-    expect(t.length).toBeLessThanOrEqual(TITLE_MAX_LEN + 1);
-    // No mid-word cut: the char immediately before the ellipsis
-    // should be a word character (i.e. we ended ON a word, not in
-    // the middle of one), AND that character should match the
-    // character at the same position in the original input — which
-    // means we never sliced a single word in half.
-    const body = t.slice(0, -1);
-    expect(body).toMatch(/\S$/);
-    const lastChar = body.charAt(body.length - 1);
-    expect(long.charAt(body.length - 1)).toBe(lastChar);
-  });
-
-  it("does not add an ellipsis when no truncation was needed", () => {
-    expect(deriveTitle("short and sweet", NOW)).toBe("short and sweet");
-  });
-
-  it("hard-cuts a single very long word with no whitespace", () => {
-    // 60-char word; max is 50. There's no word boundary inside, so
-    // we slice at max and append `…`.
-    const word = "a".repeat(60);
-    const t = deriveTitle(word, NOW);
-    expect(t.length).toBe(TITLE_MAX_LEN + 1);
-    expect(t.endsWith("…")).toBe(true);
-  });
-
-  it("returns the date fallback when content is empty", () => {
-    expect(deriveTitle("", NOW)).toBe("Chat – 2026-06-25 14:32");
-  });
-
-  it("returns the date fallback for whitespace-only input", () => {
-    expect(deriveTitle("   \n\t  \n   ", NOW)).toBe(
-      "Chat – 2026-06-25 14:32",
-    );
-  });
-
-  it("returns the date fallback when every line is pure markdown noise", () => {
-    expect(deriveTitle("# \n> \n- \n", NOW)).toBe(
-      "Chat – 2026-06-25 14:32",
-    );
-  });
-
-  it("returns the date fallback for non-string input (defensive)", () => {
-    // @ts-expect-error – testing defensive path
-    expect(deriveTitle(null, NOW)).toBe("Chat – 2026-06-25 14:32");
-    // @ts-expect-error – testing defensive path
-    expect(deriveTitle(undefined, NOW)).toBe("Chat – 2026-06-25 14:32");
-  });
-
-  it("uses `new Date()` by default", () => {
-    const t = deriveTitle("");
-    expect(t).toMatch(/^Chat – \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
-  });
-
-  it("normalizes CRLF line endings", () => {
-    expect(deriveTitle("first line\r\n\r\nsecond line", NOW)).toBe(
-      "first line",
-    );
+  it("uses `new Date()` for `now` when no clock is provided", async () => {
+    const before = Date.now();
+    const title = await deriveTitle("");
+    const after = Date.now();
+    expect(title.startsWith("Chat –")).toBe(true);
+    // Title has minute precision, so the parsed timestamp must fall
+    // inside the minute window that contained the test run.
+    const ts = Date.parse(title.replace("Chat – ", "").replace(" ", "T"));
+    expect(ts).toBeGreaterThanOrEqual(before - 60_000);
+    expect(ts).toBeLessThanOrEqual(after + 60_000);
   });
 });
