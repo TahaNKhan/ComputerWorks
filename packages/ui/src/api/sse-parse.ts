@@ -124,6 +124,12 @@ function reconstructServerEvent(
       return null;
     case "done":
       return { type: "done" };
+    case "session_renamed": {
+      const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
+      const title = typeof body.title === "string" ? body.title : "";
+      if (!sessionId) return null;
+      return { type: "session_renamed", sessionId, title };
+    }
     default:
       return null;
   }

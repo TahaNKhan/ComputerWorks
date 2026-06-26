@@ -116,6 +116,18 @@ describe("parseSSEFrame", () => {
     });
   });
 
+  test("parses session_renamed", () => {
+    const body = JSON.stringify({ sessionId: "sess-1", title: "Help with React" });
+    const ev = parseSSEFrame(`event: session_renamed\ndata: ${body}`);
+    expect(ev).toEqual({ type: "session_renamed", sessionId: "sess-1", title: "Help with React" });
+  });
+
+  test("returns null for session_renamed with missing sessionId", () => {
+    const body = JSON.stringify({ title: "no id" });
+    const ev = parseSSEFrame(`event: session_renamed\ndata: ${body}`);
+    expect(ev).toBeNull();
+  });
+
   test("returns null for unknown event types", () => {
     const ev = parseSSEFrame("event: bogus\ndata: {}");
     expect(ev).toBeNull();
