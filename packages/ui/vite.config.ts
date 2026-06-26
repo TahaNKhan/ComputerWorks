@@ -30,10 +30,20 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Bind to IPv4 loopback only. Default `localhost` on Windows
+    // resolves to `::1` (IPv6) first, which leaves an orphan
+    // listener behind that breaks `/api` proxy resolution when a
+    // second Vite is started. 127.0.0.1 matches the Fastify
+    // server's bind host.
+    host: "127.0.0.1",
     strictPort: false,
     proxy: {
       "/api": {
-        target: `http://localhost:${serverPort}`,
+        // Match the Fastify server's bind host (127.0.0.1, not
+        // localhost). On Windows `localhost` resolves to `::1`
+        // (IPv6) first and the server only listens on IPv4, so the
+        // proxy gets ECONNREFUSED.
+        target: `http://127.0.0.1:${serverPort}`,
         changeOrigin: false,
       },
     },
