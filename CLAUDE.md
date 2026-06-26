@@ -56,6 +56,8 @@ pushes. Do not bypass it.
 - ✅ Phase 9 — MiniMax auth fix (LAN deployment followup) done on `phase/9-minimax-auth`
 - ✅ Phase 10 — Mobile-friendly UI (LAN deployment followup) done on `phase/10-mobile-friendly`
 - ✅ Phase 11 — Persist LLM responses to transcript done on `phase/11-persist-responses`
+- ✅ Phase 12 — URL-routable sessions + LLM-generated titles done on `phase/auto`
+  (T12.x tool_validation_error folded in from `phase/12-url-and-titles`)
 - 🎉 Build complete — no further phases planned
 
 ## CRITICAL: How to update TASKS.MD
