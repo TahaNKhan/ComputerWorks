@@ -5,6 +5,9 @@
 // T10 — Adds a mobile drawer for the SessionList. On narrow screens
 //        the sidebar is hidden behind a hamburger button; on tablet+
 //        it stays inline.
+// T12.2 — Wires the URL to the active session. On mount, reads
+//         `/s/:id` from the URL and switches to that session (if
+//         it exists). Browser back/forward are wired via popstate.
 
 import React, { useEffect, useState } from "react";
 import { SessionList } from "./components/SessionList.js";
@@ -15,14 +18,21 @@ import { Settings } from "./components/Settings.js";
 import { SessionSwitcher } from "./components/SessionSwitcher.js";
 import { useSessionsStore } from "./store/sessions.js";
 import { subscribeToSession } from "./store/stream.js";
+import {
+  parseSessionIdFromUrl,
+  replaceSessionInUrl,
+  subscribeToRouteChanges,
+} from "./lib/router.js";
 import { useShortcut, shortcutLabel } from "./lib/shortcuts.js";
 
 export function App(): JSX.Element {
   const errorMessage = useSessionsStore((s) => s.errorMessage);
   const loadSessions = useSessionsStore((s) => s.loadSessions);
   const activeSessionId = useSessionsStore((s) => s.activeSessionId);
+  const sessions = useSessionsStore((s) => s.sessions);
   const status = useSessionsStore((s) => s.status);
   const cancelTurn = useSessionsStore((s) => s.cancelTurn);
+  const switchSession = useSessionsStore((s) => s.switchSession);
 
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -36,9 +46,49 @@ export function App(): JSX.Element {
     setDrawerOpen(false);
   }, [activeSessionId]);
 
+  // Load the session list once on mount.
   useEffect(() => {
     void loadSessions();
   }, [loadSessions]);
+
+  // T12.2 — URL-driven session selection.
+  // Two pieces:
+  //   1. On mount + after loadSessions: if the URL is `/s/:id`,
+  //      switch to that session. If the id doesn't exist (or the
+  //      load failed), reset the URL to `/` and show a banner.
+  //   2. Subscribe to popstate so browser back/forward switch sessions.
+  // The dependency array below deliberately re-runs when `sessions`
+  // changes (so a deep link arriving before the list loaded still
+  // activates once the list arrives) and when `loadSessions` /
+  // `switchSession` change identity (re-mount safety).
+  useEffect(() => {
+    const fromUrl = parseSessionIdFromUrl();
+    if (!fromUrl) {
+      // No deep link — replace the current URL so the next switch
+      // gets a fresh history entry (no stale one from before mount).
+      replaceSessionInUrl(activeSessionId);
+      return;
+    }
+    if (sessions.some((s) => s.id === fromUrl)) {
+      void switchSession(fromUrl);
+    } else {
+      // Id from URL doesn't exist; clear the URL and surface the error.
+      replaceSessionInUrl(null);
+      useSessionsStore.setState({
+        errorMessage: `Session not found: ${fromUrl}`,
+      });
+    }
+    // We intentionally exclude `activeSessionId` — it would cause
+    // an infinite loop because switchSession updates it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessions, loadSessions, switchSession]);
+
+  useEffect(() => {
+    const unsub = subscribeToRouteChanges((id) => {
+      void switchSession(id);
+    });
+    return unsub;
+  }, [switchSession]);
 
   // SSE: open (or replace) the stream whenever the active session changes.
   useEffect(() => {

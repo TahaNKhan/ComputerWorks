@@ -51,6 +51,7 @@ export type ServerEvent =
       reason?: string;
     }
   | { type: "message_done"; usage: { input: number; output: number } }
+  | { type: "session_renamed"; sessionId: string; title: string }
   | { type: "error"; message: string }
   | { type: "done" };
 

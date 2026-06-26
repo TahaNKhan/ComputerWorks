@@ -22,6 +22,7 @@ import { SSEManager, type ServerEvent } from "../sse.js";
 import type { Config } from "../config.js";
 import { buildSystemPrompt } from "../system-prompt.js";
 import { defaultTools } from "../tools/index.js";
+import { deriveTitle } from "../title.js";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -79,6 +80,21 @@ export async function runAgentForSession(
 
     const meta = await deps.store.get(sessionId);
     if (!meta) throw new Error("session disappeared");
+
+    // Auto-title on the first message. Idempotent: only fires when
+    // the session has no title yet, so a manual rename made before
+    // the first turn is preserved. The SSE event arrives before the
+    // agent stream starts, so the sidebar updates in lockstep with
+    // the user's send.
+    if (!meta.title) {
+      const title = deriveTitle(userContent);
+      const updated = await deps.store.patch(sessionId, { title });
+      deps.sse.send(sessionId, {
+        type: "session_renamed",
+        sessionId,
+        title: updated.title,
+      });
+    }
 
     const provider = deps.createProvider(perRequestOverrides);
     const memoryRoot = meta.memoryRoot ?? defaultMemoryRoot();

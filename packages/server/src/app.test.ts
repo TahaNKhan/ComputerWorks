@@ -273,6 +273,107 @@ describe("messages + stream", () => {
     const finalAssistant = transcript[3]!;
     expect(finalAssistant.content).toEqual([{ type: "text", text: "done" }]);
   });
+
+  // T12.1 — auto-title on first message.
+  it("auto-titles the session from the first user message and emits session_renamed SSE", async () => {
+    const store = new SessionStore({ root: sessionsRoot });
+    const app = await buildApp({
+      config: { ...baseConfig, server: { ...baseConfig.server!, port: 4747 } },
+      store,
+      createProvider: scriptedProvider,
+      autoApprove: true,
+    });
+
+    const cw = (app as unknown as {
+      __cw: { sse: { subscribe(id: string): AsyncIterable<Uint8Array> & { dispose(): void } } };
+    }).__cw;
+
+    const create = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const sessionId = create.json().id;
+    expect(create.json().title).toBe("");
+
+    // Subscribe to SSE before sending so we see the session_renamed event.
+    const chunks: Buffer[] = [];
+    const sub = cw.sse.subscribe(sessionId);
+    const drainPromise = (async () => {
+      try {
+        for await (const chunk of sub) chunks.push(Buffer.from(chunk));
+      } catch { /* expected on close */ }
+    })();
+
+    const post = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${sessionId}/messages`,
+      payload: { content: "Help me write a React component for a todo list" },
+    });
+    expect(post.statusCode).toBe(204);
+
+    // Wait until the turn finishes (4 messages expected).
+    for (let i = 0; i < 100; i++) {
+      const msgs = await store.getMessages(sessionId);
+      if (msgs.length >= 4) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+
+    // Meta on disk has the derived title.
+    const meta = await store.get(sessionId);
+    expect(meta?.title).toBe("Help me write a React component for a todo list");
+
+    // SSE stream contains a session_renamed frame with the new title.
+    const all = Buffer.concat(chunks).toString("utf8");
+    expect(all).toMatch(/event: session_renamed/);
+    expect(all).toMatch(/Help me write a React component/);
+
+    // The GET endpoint reflects the title too.
+    const fetched = await app.inject({ method: "GET", url: `/api/sessions/${sessionId}` });
+    expect(fetched.statusCode).toBe(200);
+    expect(fetched.json().meta.title).toBe(
+      "Help me write a React component for a todo list",
+    );
+
+    // Clean up the SSE consumer so the test exits promptly.
+    sub.dispose();
+    await drainPromise;
+  });
+
+  it("does not overwrite a manual title with auto-title", async () => {
+    const store = new SessionStore({ root: sessionsRoot });
+    const app = await buildApp({
+      config: { ...baseConfig, server: { ...baseConfig.server!, port: 4747 } },
+      store,
+      createProvider: scriptedProvider,
+      autoApprove: true,
+    });
+
+    const create = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const sessionId = create.json().id;
+
+    // User renames the session manually before sending the first message.
+    const rename = await app.inject({
+      method: "PATCH",
+      url: `/api/sessions/${sessionId}`,
+      payload: { title: "My Custom Title" },
+    });
+    expect(rename.statusCode).toBe(200);
+    expect(rename.json().title).toBe("My Custom Title");
+
+    const post = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${sessionId}/messages`,
+      payload: { content: "completely different content here" },
+    });
+    expect(post.statusCode).toBe(204);
+
+    for (let i = 0; i < 100; i++) {
+      const msgs = await store.getMessages(sessionId);
+      if (msgs.length >= 4) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+
+    const meta = await store.get(sessionId);
+    // Manual title preserved; auto-title did NOT fire.
+    expect(meta?.title).toBe("My Custom Title");
+  });
 });
 
 // ─── T5.8 (cancel) ───────────────────────────────────────────────────────

@@ -414,6 +414,66 @@ User noticed the session transcript (messages.jsonl) only contains the user mess
       tool(tool_result), assistant(text)]` — fails before this
       fix, passes after
 
+### Phase 12 — Session names + URL navigation
+
+User asked for two followups: (1) auto-generate readable session names so the sidebar isn't a wall of opaque ids; (2) put the active session id in the URL so users can deep-link, bookmark, and use browser back/forward to switch sessions.
+
+- [x] T12.1 — Auto-title sessions from first user message #phase12 @ready target:phase12 _done:2026-06-25
+  - **Files**: `packages/server/src/title.ts` (new),
+    `packages/server/src/title.test.ts` (new),
+    `packages/server/src/routes/messages.ts`,
+    `packages/server/src/sse.ts`,
+    `packages/server/src/app.test.ts`,
+    `packages/ui/src/api/types.ts`,
+    `packages/ui/src/store/sessions.ts`,
+    `packages/ui/src/store/sessions.test.ts`
+  - **Deps**: none
+  - **Done when**:
+    - `deriveTitle(content)` returns a short, readable title
+      (≤50 chars at a word boundary, ellipsis on truncation, markdown
+      noise stripped); falls back to `Chat – YYYY-MM-DD HH:MM` if the
+      cleaned content is empty
+    - In `runAgentForSession`, after the user message is persisted
+      and before `runTurn` runs: if `meta.title` is empty, derive a
+      title from `userContent`, `store.patch(sessionId, { title })`,
+      and emit a `session_renamed` SSE event
+    - The hook is idempotent (only fires when title is empty); a
+      manual rename before the first message is preserved
+    - `ServerEvent` union gets `{ type: "session_renamed"; sessionId:
+      string; title: string }` on both server (`sse.ts`) and UI
+      (`api/types.ts`) sides — kept in sync
+    - The UI reducer `reduceEvent` updates the matching entry in
+      `sessions: SessionMeta[]` so the sidebar refreshes in place
+    - Unit tests for `deriveTitle` cover: short, long (truncation),
+      markdown noise, multi-line, empty / whitespace-only (22 tests)
+    - `app.test.ts` regression: after a scripted turn, the SSE
+      stream contains `event: session_renamed` and
+      `GET /api/sessions/:id` shows the derived title
+    - `sessions.test.ts` regression: `reduceEvent` with a
+      `session_renamed` event updates the right session
+- [x] T12.2 — URL-driven active session via History API #phase12 @ready target:phase12 _done:2026-06-25
+  - **Files**: `packages/ui/src/lib/router.ts` (new),
+    `packages/ui/src/lib/router.test.ts` (new),
+    `packages/ui/src/store/sessions.ts`,
+    `packages/ui/src/store/sessions.test.ts`,
+    `packages/ui/src/App.tsx`
+  - **Deps**: T12.1
+  - **Done when**:
+    - `router.ts` exposes `parseSessionIdFromPath`,
+      `parseSessionIdFromUrl`, `navigateToSession(id)`,
+      `replaceSessionInUrl(id)`, and `subscribeToRouteChanges(handler)`
+    - URL shape is `/s/:id`; root `/` means no active session
+    - `switchSession`, `createSession`, `deleteSession` in the store
+      sync the URL via `navigateToSession`; `popstate` is wired so
+      browser back/forward switches sessions
+    - On initial load with `/s/:id`: if the session exists,
+      `activeSessionId` is set; if it doesn't, the URL is replaced
+      with `/` and an error banner surfaces
+    - Tests for the router cover parsing, push/replace, and the
+      `popstate` subscription (no-op in non-browser env)
+    - Tests for the store cover the URL side-effect on the three
+      mutating actions (via a stubbed `window.history` + `fetch`)
+
 ## Gates (run continuously)
 
 - [ ] Typecheck gate #gates @ready — every PR (or every push) runs

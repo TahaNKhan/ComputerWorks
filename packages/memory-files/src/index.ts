@@ -16,7 +16,7 @@
 // alphanumerics, dash, underscore, dot — anything else is rejected.
 
 import { mkdir, readFile, writeFile, readdir, unlink, stat } from "node:fs/promises";
-import { join, basename, extname } from "node:path";
+import path, { join, basename, extname } from "node:path";
 import { z } from "zod";
 
 const NAME_RE = /^[A-Za-z0-9._-]+$/;
@@ -168,14 +168,14 @@ export function createFileMemoryProvider(opts: FileMemoryProviderOptions): Memor
 
     async write(name: string, content: string): Promise<void> {
       assertValidName(name);
-      if (name.includes("/") || name.includes("\\") || name.startsWith(".")) {
+      if (name.includes(path.sep) || name.includes("\\") || name.startsWith(".")) {
         throw new Error(`memory name escapes root: ${name}`);
       }
       await ensureDirs(root);
       const full = join(notesDir(root), `${name}.md`);
       // Path-traversal check: the resolved path must be inside notesDir.
       const notesAbs = join(notesDir(root));
-      if (!full.startsWith(notesAbs.endsWith("/") ? notesAbs : notesAbs + "/")) {
+      if (!full.startsWith(notesAbs.endsWith(path.sep) ? notesAbs : notesAbs + path.sep)) {
         throw new Error(`memory name escapes root: ${name}`);
       }
       await writeFile(full, content, "utf8");

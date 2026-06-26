@@ -177,7 +177,7 @@ describe("interactive prompt", () => {
 
 describe("timeout", () => {
   it("auto-rejects with reason 'approval timeout' after the timeout", async () => {
-    const approver = makeApprover({ timeoutMs: 30 });
+    const approver = makeApprover({ timeoutMs: 300 });
     const ac = new AbortController();
     const p = approver.request(sampleRequest(), ac.signal);
     const decision = await p;

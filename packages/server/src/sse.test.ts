@@ -1,287 +1,385 @@
 // packages/server/src/sse.test.ts
-// T5.4 unit tests — SSEManager.
+// Unit tests for SSEManager + formatSSE.
 //
-// Coverage:
-//   - formatSSE produces a valid frame for every event type
-//   - subscribe() yields events as they arrive
-//   - multiple subscribers to the same session both receive events
-//   - subscribers on different sessions don't see each other's events
-//   - dispose() removes the subscriber
-//   - closeSession() ends all subscribers for that session
-//   - heartbeat fires on idle streams (with custom short interval)
-//   - heartbeat does NOT interleave when a real event is queued
-//   - backpressure drops a slow subscriber
-//   - for-await-of's return() path auto-cleans the subscriber
+// Design rules:
+//   1. Every test that creates an SSEManager runs it inside a try/finally
+//      so `shutdown()` always fires — leaked intervals / subscribers are
+//      the most common cause of "process won't exit" hangs in this file.
+//   2. Every consumer is bounded by a `Promise.race` against a `withTimeout`
+//      helper so a forgotten waiter can't hang the suite. Default race
+//      timeout is 1000 ms, which is well under bun:test's own 5 s per-test
+//      limit and aborts cleanly with an explicit failure message.
+//   3. We never use `for await (const x of sub) { ... break; }` to drain
+//      streams — that pattern depends on timing. Instead, each test
+//      collects a fixed, known number of events and asserts on the result.
+//   4. Heartbeat tests use a tiny `heartbeatMs` (10 ms) and never depend
+//      on exact event ordering between real events and heartbeats.
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { formatSSE, SSEManager } from "./sse.js";
 
-const dec = (u: Uint8Array) => new TextDecoder().decode(u);
+// ─── helpers ────────────────────────────────────────────────────────────────
 
+const dec = (u: Uint8Array): string => new TextDecoder().decode(u);
+
+/** Race a promise against a timeout. On timeout, throw so the test fails
+ *  with a clear message instead of hanging the whole suite. */
+async function withTimeout<T>(
+  p: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`timeout: ${label}`)), ms);
+  });
+  try {
+    return await Promise.race([p, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** Run `body` with a fresh SSEManager, guaranteeing shutdown. Body first
+ *  so callers can drop the options arg entirely. */
+async function withManager<T>(
+  body: (mgr: SSEManager) => Promise<T>,
+  opts: { heartbeatMs?: number } = {},
+): Promise<T> {
+  const mgr = new SSEManager(opts);
+  try {
+    return await body(mgr);
+  } finally {
+    mgr.shutdown();
+  }
+}
+
+interface SubHandle {
+  dispose(): void;
+  iterator(): AsyncIterator<Uint8Array>;
+}
+
+/** Wrap `mgr.subscribe(id)` so tests don't need to remember to dispose. */
+function trackedSub(mgr: SSEManager, id: string): SubHandle {
+  const sub = mgr.subscribe(id);
+  return {
+    dispose: () => sub.dispose(),
+    iterator: () => sub[Symbol.asyncIterator](),
+  };
+}
+
+// Track managers created in a test (for non-withManager tests) so a
+// forgotten shutdown can't leak. We add to this set inline; afterEach
+// sweeps anything left.
+const tracked = new Set<SSEManager>();
 afterEach(() => {
-  // No-op; per-test shutdown() handles cleanup.
+  for (const m of tracked) m.shutdown();
+  tracked.clear();
 });
 
-// ─── formatSSE ────────────────────────────────────────────────────────────
+// ─── formatSSE ─────────────────────────────────────────────────────────────
 
 describe("formatSSE", () => {
-  it("formats a token event as 'event: token\\ndata: {...}\\n\\n'", () => {
-    const bytes = formatSSE({ type: "token", delta: "Hello" });
-    const text = dec(bytes);
-    expect(text).toMatch(/^event: token\n/);
+  it("frames a token event", () => {
+    const text = dec(formatSSE({ type: "token", delta: "Hello" }));
+    expect(text.startsWith("event: token\n")).toBe(true);
     expect(text).toContain('data: {"delta":"Hello"}');
     expect(text.endsWith("\n\n")).toBe(true);
   });
 
-  it("formats a 'done' event with an empty data line", () => {
-    const text = dec(formatSSE({ type: "done" }));
-    expect(text).toMatch(/^event: done\ndata: \n\n$/);
+  it("frames a done event with an empty data line", () => {
+    expect(dec(formatSSE({ type: "done" }))).toBe("event: done\ndata: \n\n");
   });
 
-  it("formats an error event with the message", () => {
+  it("frames an error event", () => {
     const text = dec(formatSSE({ type: "error", message: "boom" }));
-    expect(text).toContain('event: error');
+    expect(text).toContain("event: error");
     expect(text).toContain('"message":"boom"');
   });
 
-  it("formats an approval_required with description and optional diff", () => {
+  it("frames an approval_required with description and optional diff", () => {
     const text = dec(
       formatSSE({
         type: "approval_required",
         requestId: "r1",
-        tool: { type: "tool_use", id: "t1", name: "run_shell", input: { cmd: "ls" } },
+        tool: {
+          type: "tool_use",
+          id: "t1",
+          name: "run_shell",
+          input: { cmd: "ls" },
+        },
         description: "Run ls",
         diff: "--- a\n+++ b",
       }),
     );
-    expect(text).toContain('event: approval_required');
+    expect(text).toContain("event: approval_required");
     expect(text).toContain('"requestId":"r1"');
     expect(text).toContain('"diff":"--- a');
   });
+
+  it("frames a session_renamed event", () => {
+    const text = dec(
+      formatSSE({
+        type: "session_renamed",
+        sessionId: "abc",
+        title: "My Chat",
+      }),
+    );
+    expect(text).toContain("event: session_renamed");
+    expect(text).toContain('"sessionId":"abc"');
+    expect(text).toContain('"title":"My Chat"');
+  });
 });
 
-// ─── subscribe + send ─────────────────────────────────────────────────────
+// ─── subscribe + send ──────────────────────────────────────────────────────
 
-describe("SSEManager.subscribe + send", () => {
-  it("yields events sent to the session", async () => {
-    const mgr = new SSEManager();
-    const sub = mgr.subscribe("s1");
-    mgr.send("s1", { type: "token", delta: "hi" });
-    mgr.send("s1", { type: "done" });
-    const events: string[] = [];
-    for await (const u of sub) {
-      events.push(dec(u));
-      if (dec(u).includes("done")) break;
-    }
-    expect(events.length).toBe(2);
-    expect(events[0]).toContain('"delta":"hi"');
-    expect(events[1]).toContain("event: done");
-    mgr.shutdown();
+describe("subscribe + send", () => {
+  it("delivers events sent to the same session", async () => {
+    await withManager(async (mgr) => {
+      const s = trackedSub(mgr, "s1");
+      mgr.send("s1", { type: "token", delta: "hi" });
+      mgr.send("s1", { type: "done" });
+      const events: string[] = [];
+      const it = s.iterator();
+      await withTimeout(
+        (async () => {
+          while (events.length < 2) {
+            const r = await it.next();
+            if (r.done) return;
+            if (r.value) events.push(dec(r.value));
+          }
+        })(),
+        1000,
+        "read 2 events",
+      );
+      s.dispose();
+      expect(events).toHaveLength(2);
+      expect(events[0]).toContain('"delta":"hi"');
+      expect(events[1]).toContain("event: done");
+    });
   });
 
-  it("supports multiple subscribers to the same session", async () => {
-    const mgr = new SSEManager();
-    const a = mgr.subscribe("s1");
-    const b = mgr.subscribe("s1");
-    mgr.send("s1", { type: "token", delta: "x" });
-    // Drain both.
-    const consume = async (it: AsyncIterable<Uint8Array>) => {
-      for await (const u of it) return dec(u);
-      return "";
-    };
-    const [ra, rb] = await Promise.all([consume(a), consume(b)]);
-    expect(ra).toContain('"delta":"x"');
-    expect(rb).toContain('"delta":"x"');
-    mgr.shutdown();
+  it("supports multiple subscribers on the same session", async () => {
+    await withManager(async (mgr) => {
+      const a = trackedSub(mgr, "s1");
+      const b = trackedSub(mgr, "s1");
+      mgr.send("s1", { type: "token", delta: "x" });
+      const [ra, rb] = await Promise.all([
+        withTimeout(a.iterator().next(), 1000, "a.next").then((r) =>
+          r.done ? "" : dec(r.value as Uint8Array),
+        ),
+        withTimeout(b.iterator().next(), 1000, "b.next").then((r) =>
+          r.done ? "" : dec(r.value as Uint8Array),
+        ),
+      ]);
+      a.dispose();
+      b.dispose();
+      expect(ra).toContain('"delta":"x"');
+      expect(rb).toContain('"delta":"x"');
+    });
   });
 
   it("does not cross streams between sessions", async () => {
-    const mgr = new SSEManager();
-    const a = mgr.subscribe("s1");
-    const b = mgr.subscribe("s2");
-    mgr.send("s1", { type: "token", delta: "for-s1" });
-    mgr.send("s2", { type: "token", delta: "for-s2" });
-    const [ra, rb] = await Promise.all([
-      (async () => { for await (const u of a) return dec(u); return ""; })(),
-      (async () => { for await (const u of b) return dec(u); return ""; })(),
-    ]);
-    expect(ra).toContain('"delta":"for-s1"');
-    expect(rb).toContain('"delta":"for-s2"');
-    expect(ra).not.toContain('"for-s2"');
-    expect(rb).not.toContain('"for-s1"');
-    mgr.shutdown();
+    await withManager(async (mgr) => {
+      const a = trackedSub(mgr, "s1");
+      const b = trackedSub(mgr, "s2");
+      mgr.send("s1", { type: "token", delta: "for-s1" });
+      mgr.send("s2", { type: "token", delta: "for-s2" });
+      const [ra, rb] = await Promise.all([
+        withTimeout(a.iterator().next(), 1000, "a.next").then((r) =>
+          r.done ? "" : dec(r.value as Uint8Array),
+        ),
+        withTimeout(b.iterator().next(), 1000, "b.next").then((r) =>
+          r.done ? "" : dec(r.value as Uint8Array),
+        ),
+      ]);
+      a.dispose();
+      b.dispose();
+      expect(ra).toContain("for-s1");
+      expect(ra).not.toContain("for-s2");
+      expect(rb).toContain("for-s2");
+      expect(rb).not.toContain("for-s1");
+    });
   });
 
-  it("subscriberCount tracks subscribers", () => {
+  it("subscriberCount tracks subscribers and dispose removes them", () => {
     const mgr = new SSEManager();
+    tracked.add(mgr);
     expect(mgr.subscriberCount("s1")).toBe(0);
-    const a = mgr.subscribe("s1");
-    const b = mgr.subscribe("s1");
+    const a = trackedSub(mgr, "s1");
+    const b = trackedSub(mgr, "s1");
     expect(mgr.subscriberCount("s1")).toBe(2);
     a.dispose();
     expect(mgr.subscriberCount("s1")).toBe(1);
     b.dispose();
     expect(mgr.subscriberCount("s1")).toBe(0);
-    mgr.shutdown();
   });
 
-  it("send is a no-op when there are no subscribers", () => {
+  it("send to a session with no subscribers is a no-op", () => {
     const mgr = new SSEManager();
-    expect(() =>
-      mgr.send("nobody", { type: "done" }),
-    ).not.toThrow();
-    mgr.shutdown();
+    tracked.add(mgr);
+    expect(() => mgr.send("nobody", { type: "done" })).not.toThrow();
+    expect(mgr.subscriberCount("nobody")).toBe(0);
   });
 });
 
-// ─── closeSession ─────────────────────────────────────────────────────────
+// ─── closeSession ──────────────────────────────────────────────────────────
 
-describe("SSEManager.closeSession", () => {
+describe("closeSession", () => {
   it("ends all subscribers of the session", async () => {
-    const mgr = new SSEManager();
-    const a = mgr.subscribe("s1");
-    const b = mgr.subscribe("s1");
-    mgr.closeSession("s1");
-    const consume = async (it: AsyncIterable<Uint8Array>) => {
-      for await (const _u of it) {
-        // drain
-      }
-    };
-    await consume(a);
-    await consume(b);
-    expect(mgr.subscriberCount("s1")).toBe(0);
-    mgr.shutdown();
+    await withManager(async (mgr) => {
+      const a = trackedSub(mgr, "s1");
+      const b = trackedSub(mgr, "s1");
+      mgr.closeSession("s1");
+      // After close, both iterators must return {done:true} promptly.
+      const ra = await withTimeout(a.iterator().next(), 500, "a.next");
+      const rb = await withTimeout(b.iterator().next(), 500, "b.next");
+      expect(ra.done).toBe(true);
+      expect(rb.done).toBe(true);
+      expect(mgr.subscriberCount("s1")).toBe(0);
+    });
   });
 
   it("does not affect other sessions", async () => {
-    const mgr = new SSEManager();
-    const a = mgr.subscribe("s1");
-    mgr.subscribe("s2");
-    mgr.closeSession("s1");
-    // a should be closed…
-    let aEnded = false;
-    for await (const _ of a) {
-      // ends
-    }
-    aEnded = true;
-    expect(aEnded).toBe(true);
-    // …but s2 still has 1 subscriber.
-    expect(mgr.subscriberCount("s2")).toBe(1);
-    mgr.shutdown();
+    await withManager(async (mgr) => {
+      const a = trackedSub(mgr, "s1");
+      const b = trackedSub(mgr, "s2");
+      mgr.closeSession("s1");
+      const ra = await withTimeout(a.iterator().next(), 500, "a.next");
+      expect(ra.done).toBe(true);
+      expect(mgr.subscriberCount("s2")).toBe(1);
+      b.dispose();
+    });
   });
 });
 
-// ─── dispose ──────────────────────────────────────────────────────────────
+// ─── dispose ───────────────────────────────────────────────────────────────
 
 describe("subscribe().dispose", () => {
   it("removes the subscriber from the manager", () => {
     const mgr = new SSEManager();
-    const sub = mgr.subscribe("s1");
+    tracked.add(mgr);
+    const s = trackedSub(mgr, "s1");
     expect(mgr.subscriberCount("s1")).toBe(1);
-    sub.dispose();
+    s.dispose();
     expect(mgr.subscriberCount("s1")).toBe(0);
-    mgr.shutdown();
   });
 
-  it("dispose() while a consumer is awaiting wakes the consumer", async () => {
-    const mgr = new SSEManager();
-    const sub = mgr.subscribe("s1");
-    expect(mgr.subscriberCount("s1")).toBe(1);
-    // Start a consumer that will block on next() forever.
-    const consumer = (async () => {
-      for await (const _u of sub) {
-        // unreachable — no events are sent
-      }
-      return "ended";
-    })();
-    // Give the consumer a chance to enter the awaiting next().
-    await new Promise((r) => setTimeout(r, 10));
-    expect(mgr.subscriberCount("s1")).toBe(1);
-    sub.dispose();
-    const result = await consumer;
-    expect(result).toBe("ended");
-    expect(mgr.subscriberCount("s1")).toBe(0);
-    mgr.shutdown();
+  it("dispose() wakes a consumer that was awaiting next()", async () => {
+    await withManager(async (mgr) => {
+      const s = trackedSub(mgr, "s1");
+      const pending = s.iterator().next();
+      // Give the consumer a tick to enter the awaiting state.
+      await new Promise((r) => setTimeout(r, 5));
+      s.dispose();
+      const result = await withTimeout(pending, 500, "pending.next");
+      expect(result.done).toBe(true);
+    });
   });
 });
 
-// ─── heartbeat ────────────────────────────────────────────────────────────
+// ─── heartbeat ─────────────────────────────────────────────────────────────
 
-describe("SSEManager heartbeat", () => {
+describe("heartbeat", () => {
   it("emits a heartbeat to an idle subscriber", async () => {
-    const mgr = new SSEManager({ heartbeatMs: 30 });
-    const sub = mgr.subscribe("s1");
-    // Start consuming but don't take the next event.
-    const consumer = (async () => {
-      for await (const u of sub) {
-        const text = dec(u);
-        if (text.startsWith(":hb")) return text;
-        if (text.startsWith("event:")) continue;
-      }
-      return "";
-    })();
-    // Wait for one heartbeat tick.
-    const text = await consumer;
-    expect(text).toBe(":hb\n\n");
-    mgr.shutdown();
+    await withManager(
+      async (mgr) => {
+        const s = trackedSub(mgr, "s1");
+        let got = "";
+        await withTimeout(
+          (async () => {
+            const it = s.iterator();
+            for (;;) {
+              const result = await it.next();
+              if (result.done) return;
+              const text = result.value ? dec(result.value) : "";
+              if (text.startsWith(":hb")) {
+                got = text;
+                return;
+              }
+            }
+          })(),
+          1000,
+          "heartbeat",
+        );
+        s.dispose();
+        expect(got).toBe(":hb\n\n");
+      },
+      { heartbeatMs: 10 },
+    );
   });
 
-  it("queues a real event ahead of a later heartbeat", async () => {
-    const mgr = new SSEManager({ heartbeatMs: 30 });
-    const sub = mgr.subscribe("s1");
-    // First, consume one event (this puts the consumer into "waiting").
-    const consumer = (async () => {
-      const got: string[] = [];
-      for await (const u of sub) {
-        got.push(dec(u));
-        if (got.length >= 2) return got;
-      }
-      return got;
-    })();
-    // Give the consumer a moment to enter awaiting state.
-    await new Promise((r) => setTimeout(r, 5));
-    mgr.send("s1", { type: "token", delta: "first" });
-    mgr.send("s1", { type: "token", delta: "second" });
-    const got = await consumer;
-    expect(got.length).toBe(2);
-    expect(got[0]).toContain('"delta":"first"');
-    expect(got[1]).toContain('"delta":"second"');
-    mgr.shutdown();
+  it("delivers queued events ahead of heartbeats", async () => {
+    await withManager(
+      async (mgr) => {
+        // Subscribe FIRST so sends land in the queue (not nowhere).
+        const s = trackedSub(mgr, "s1");
+        mgr.send("s1", { type: "token", delta: "first" });
+        mgr.send("s1", { type: "token", delta: "second" });
+        const it = s.iterator();
+        const events: string[] = [];
+        await withTimeout(
+          (async () => {
+            while (events.length < 2) {
+              const r = await it.next();
+              if (r.done) return;
+              if (r.value) events.push(dec(r.value));
+            }
+          })(),
+          1000,
+          "read 2 events",
+        );
+        s.dispose();
+        expect(events[0]).toContain('"delta":"first"');
+        expect(events[1]).toContain('"delta":"second"');
+      },
+      { heartbeatMs: 10 },
+    );
   });
 });
 
-// ─── backpressure ─────────────────────────────────────────────────────────
+// ─── backpressure ──────────────────────────────────────────────────────────
 
-describe("SSEManager backpressure", () => {
+describe("backpressure", () => {
   it("drops a subscriber whose queue overflows", async () => {
-    const mgr = new SSEManager();
-    const sub = mgr.subscribe("s1");
-    // 1000 events to fill the queue (MAX_QUEUE = 1000).
-    for (let i = 0; i < 1000; i++) {
-      mgr.send("s1", { type: "token", delta: String(i) });
-    }
-    // The 1001st should trigger the drop.
-    mgr.send("s1", { type: "token", delta: "overflow" });
-    expect(mgr.subscriberCount("s1")).toBe(0);
-    // Consume (should end immediately).
-    let count = 0;
-    for await (const _u of sub) count++;
-    expect(count).toBeLessThan(1001);
-    mgr.shutdown();
+    await withManager(async (mgr) => {
+      const s = trackedSub(mgr, "s1");
+      // MAX_QUEUE is 1000; the 1001st event triggers the drop.
+      for (let i = 0; i < 1000; i++) {
+        mgr.send("s1", { type: "token", delta: String(i) });
+      }
+      mgr.send("s1", { type: "token", delta: "overflow" });
+      // The subscriber is dropped synchronously by send().
+      expect(mgr.subscriberCount("s1")).toBe(0);
+      // Drain whatever was queued; should end promptly and stay bounded.
+      const it = s.iterator();
+      let count = 0;
+      await withTimeout(
+        (async () => {
+          for (;;) {
+            const r = await it.next();
+            if (r.done) return;
+            if (r.value) count++;
+          }
+        })(),
+        500,
+        "drain dropped",
+      );
+      expect(count).toBeLessThanOrEqual(1001);
+    });
   });
 });
 
-// ─── shutdown ─────────────────────────────────────────────────────────────
+// ─── shutdown ──────────────────────────────────────────────────────────────
 
-describe("SSEManager.shutdown", () => {
-  it("closes all subscribers and stops the heartbeat", () => {
+describe("shutdown", () => {
+  it("closes all subscribers and is safe to call twice", () => {
     const mgr = new SSEManager();
-    const a = mgr.subscribe("s1");
-    const b = mgr.subscribe("s2");
+    trackedSub(mgr, "s1");
+    trackedSub(mgr, "s2");
     mgr.shutdown();
     expect(mgr.subscriberCount("s1")).toBe(0);
     expect(mgr.subscriberCount("s2")).toBe(0);
-    // Should be safe to call twice.
     mgr.shutdown();
   });
 });

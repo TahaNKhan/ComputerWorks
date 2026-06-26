@@ -26,6 +26,10 @@ import {
   postMessage as apiPostMessage,
   renameSession as apiRenameSession,
 } from "../api/client.js";
+import {
+  navigateToSession,
+  replaceSessionInUrl,
+} from "../lib/router.js";
 import type {
   AuditEntry,
   ApprovalDecision,
@@ -148,6 +152,9 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
         auditBySession: { ...s.auditBySession, [meta.id]: [] },
         errorMessage: null,
       }));
+      // Deep-link the URL to the new session so the user can
+      // bookmark / share / reload it.
+      navigateToSession(meta.id);
       return meta;
     } catch (err) {
       set({ errorMessage: (err as Error).message ?? "Failed to create session" });
@@ -158,19 +165,26 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
   deleteSession: async (id) => {
     try {
       await apiDeleteSession(id);
+      let wasActive = false;
       set((s) => {
         const next = { ...s.messagesBySession };
         delete next[id];
         const nextAudit = { ...s.auditBySession };
         delete nextAudit[id];
         const sessions = s.sessions.filter((x) => x.id !== id);
+        wasActive = s.activeSessionId === id;
         return {
           sessions,
           messagesBySession: next,
           auditBySession: nextAudit,
-          activeSessionId: s.activeSessionId === id ? null : s.activeSessionId,
+          activeSessionId: wasActive ? null : s.activeSessionId,
         };
       });
+      // If we just deleted the active session, drop back to the
+      // root URL so the back button doesn't try to re-open a dead
+      // session. (The popstate listener will fire on the next back
+      // press and switch to whatever session was active before.)
+      if (wasActive) navigateToSession(null);
     } catch (err) {
       set({ errorMessage: (err as Error).message ?? "Failed to delete session" });
     }
@@ -189,6 +203,10 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
 
   switchSession: async (id) => {
     set({ activeSessionId: id, pendingApproval: null, errorMessage: null });
+    // Keep the URL in sync with the active session so the user can
+    // deep-link / use browser back. pushState (not replaceState) so
+    // back returns to the previous session, not the empty state.
+    navigateToSession(id);
     if (id && !get().messagesBySession[id]) {
       await get().loadTranscript(id);
     }
@@ -329,6 +347,7 @@ function reduceEvent(
   let status: RunStatus = state.status;
   let pendingApproval: PendingApproval | null = state.pendingApproval;
   let errorMessage: string | null = state.errorMessage;
+  let nextSessions: SessionMeta[] | null = null;
 
   switch (ev.type) {
     case "message_start": {
@@ -386,6 +405,14 @@ function reduceEvent(
       status = "idle";
       break;
     }
+    case "session_renamed": {
+      // Update the matching entry in the sidebar list so the new
+      // title shows up without a refetch. No-op for an unknown id.
+      nextSessions = state.sessions.map((s) =>
+        s.id === ev.sessionId ? { ...s, title: ev.title } : s,
+      );
+      break;
+    }
     case "done": {
       nextMsgs = finalizeStreaming(msgs);
       status = "idle";
@@ -404,6 +431,7 @@ function reduceEvent(
     status,
     pendingApproval,
     errorMessage,
+    ...(nextSessions !== null ? { sessions: nextSessions } : {}),
   };
 }
 

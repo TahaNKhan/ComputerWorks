@@ -113,7 +113,6 @@ export class InteractiveApprover implements Approver {
           });
           resolve({ kind: "reject", reason: "approval timeout" });
         }, this.timeoutMs);
-        timer.unref?.();
       }
 
       this.pending.set(requestId, (decision) => {
