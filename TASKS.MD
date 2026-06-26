@@ -446,7 +446,7 @@ non-empty (so manual renames + titled-on-create survive).
       `activeSessionId` accordingly.
     - Visiting `/` with no param shows the empty state.
 
-- [ ] T12.2 — Backend LLM-generated session titles #phase12 @ready target:phase12
+- [x] T12.2 — Backend LLM-generated session titles #phase12 @ready target:phase12 _done:2026-06-26
   - **Files**: `packages/server/src/title-generator.ts` (new),
     `packages/server/src/routes/messages.ts` (call after runTurn),
     `packages/server/src/sse.ts` (add `title_updated` event),

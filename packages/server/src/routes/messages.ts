@@ -22,6 +22,7 @@ import { SSEManager, type ServerEvent } from "../sse.js";
 import type { Config } from "../config.js";
 import { buildSystemPrompt } from "../system-prompt.js";
 import { defaultTools } from "../tools/index.js";
+import { generateTitle } from "../title-generator.js";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -154,6 +155,15 @@ export async function runAgentForSession(
         await deps.store.appendMessage(sessionId, msg);
       }
     }
+
+    // T12.2 — Fire-and-forget title generation. Skipped automatically
+    // if the session already has a title (manual rename, or
+    // createSession({ title })). Errors are logged + swallowed inside
+    // generateTitle so the route's return path is unaffected.
+    void generateTitle(
+      { store: deps.store, sse: deps.sse, createProvider: deps.createProvider },
+      sessionId,
+    );
 
     return eventCount;
   } finally {

@@ -447,6 +447,22 @@ function reduceEvent(
       nextMsgs = applyValidationError(msgs, ev.call_id, ev.message);
       break;
     }
+    case "title_updated": {
+      // T12.2 — The server has filled in / updated the session's title
+      // (typically the background LLM call after the first turn).
+      // Update the matching entry in the session list so the sidebar
+      // refreshes; the active session's title bar uses the same field.
+      const updated = state.sessions.map((s) =>
+        s.id === ev.sessionId ? { ...s, title: ev.title } : s,
+      );
+      return {
+        sessions: updated,
+        ...setMessages(state, sessionId, nextMsgs),
+        status,
+        pendingApproval,
+        errorMessage,
+      };
+    }
     case "approval_required": {
       // Append an inline approval card to the message stream.
       const card: import("../api/types.js").MessagePart = {

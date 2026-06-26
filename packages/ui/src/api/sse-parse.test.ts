@@ -133,6 +133,19 @@ describe("parseSSEFrame", () => {
     });
   });
 
+  test("parses title_updated (T12.2)", () => {
+    const body = JSON.stringify({ sessionId: "abc", title: "bun workspace setup" });
+    const ev = parseSSEFrame(`event: title_updated\ndata: ${body}`);
+    expect(ev).toEqual({ type: "title_updated", sessionId: "abc", title: "bun workspace setup" });
+  });
+
+  test("returns null for title_updated with missing fields", () => {
+    expect(parseSSEFrame("event: title_updated\ndata: {}")).toBeNull();
+    expect(
+      parseSSEFrame('event: title_updated\ndata: {"sessionId": "abc"}'),
+    ).toBeNull();
+  });
+
   test("returns null for unknown event types", () => {
     const ev = parseSSEFrame("event: bogus\ndata: {}");
     expect(ev).toBeNull();

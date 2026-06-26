@@ -61,6 +61,15 @@ export type ServerEvent =
       tool: string;
       message: string;
     }
+  | {
+      /** T12.2 — The server has filled in or updated the session's
+       *  title (initial generation from the first turn, or any future
+       *  rename broadcast over SSE). The UI reducer updates the
+       *  matching session in the sidebar list. */
+      type: "title_updated";
+      sessionId: string;
+      title: string;
+    }
   | { type: "message_done"; usage: { input: number; output: number } }
   | { type: "error"; message: string }
   | { type: "done" };

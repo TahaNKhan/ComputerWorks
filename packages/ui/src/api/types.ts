@@ -175,6 +175,15 @@ export type ServerEvent =
       tool: string;
       message: string;
     }
+  | {
+      /** T12.2 — The server has filled in / updated the session's
+       *  title. Triggered by the background LLM call after the first
+       *  turn (skipped if the user already named the session). The
+       *  UI reducer updates the matching session in the sidebar. */
+      type: "title_updated";
+      sessionId: string;
+      title: string;
+    }
   | { type: "message_done"; usage: { input: number; output: number } }
   | { type: "error"; message: string }
   | { type: "done" };

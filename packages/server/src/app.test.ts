@@ -307,3 +307,149 @@ describe("approve route", () => {
 
 // Ensure ECHO_TOOL is referenced (so unused-import lints stay quiet).
 void ECHO_TOOL;
+
+// ─── T12.2 (title generator — end-to-end via buildApp) ──────────────────
+
+describe("title generator (T12.2)", () => {
+  // Reset the shared scripted playback cursor between tests so each
+  // test gets the agent-run + title-generator frames in order.
+  beforeEach(() => {
+    titleTestCursor.i = 0;
+  });
+
+  // The default `scriptedProvider` above produces 2 frames
+  // (tool_call, then text reply). `generateTitle` runs the same
+  // provider after the agent loop and consumes a 3rd frame; an
+  // empty/missing frame is a no-op for title generation, so the
+  // default scripted provider is fine for the negative assertions.
+  // For the positive assertion we need a provider that emits tokens
+  // for BOTH the agent reply AND a title.
+
+  // Module-scoped so the agent run AND the title generator share
+  // the same scripted playback. The route calls `createProvider()`
+  // once for each — both calls return distinct Provider objects
+  // backed by the same `cursor` + `frames`.
+  const titleTestFrames: StreamEvent[][] = [
+    // frame 0 — agent run, iter 1: tool_call (echo)
+    [
+      { type: "message_start" },
+      {
+        type: "tool_call",
+        call: { type: "tool_use", id: "c1", name: "echo", input: { msg: "hi" } },
+      },
+      { type: "message_done", usage: { input: 1, output: 1 } },
+    ],
+    // frame 1 — agent run, iter 2: empty frame because "echo" isn't
+    // registered. The loop sees no tool_call → ends the turn.
+    [],
+    // frame 2 — title generator: emit a short title
+    [
+      { type: "token", delta: '"echo ' },
+      { type: "token", delta: 'test"' },
+      { type: "message_done", usage: { input: 1, output: 1 } },
+    ],
+  ];
+  const titleTestCursor = { i: 0 };
+
+  function scriptedProviderWithTitle(): Provider {
+    return {
+      id: "scripted",
+      capabilities: { toolUse: true, promptCaching: false, vision: false },
+      chat(_req): AsyncIterable<StreamEvent> {
+        const frame = titleTestFrames[titleTestCursor.i++] ?? [];
+        return {
+          [Symbol.asyncIterator]() {
+            let idx = 0;
+            return {
+              async next() {
+                if (idx >= frame.length) return { value: undefined, done: true };
+                return { value: frame[idx++]!, done: false };
+              },
+              async return() { return { value: undefined, done: true }; },
+            };
+          },
+        };
+      },
+    };
+  }
+
+  it("patches meta.title and emits title_updated over SSE after the first turn", async () => {
+    const store = new SessionStore({ root: sessionsRoot });
+    const app = await buildApp({
+      config: { ...baseConfig, server: { ...baseConfig.server!, port: 4747 } },
+      store,
+      createProvider: scriptedProviderWithTitle,
+      autoApprove: true,
+    });
+
+    const create = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const sessionId = create.json().id;
+
+    // Subscribe to SSE before posting the message.
+    const cw = (app as unknown as {
+      __cw: {
+        sse: {
+          subscribe(id: string): AsyncIterable<Uint8Array> & { dispose(): void };
+        };
+      };
+    }).__cw;
+    const chunks: Buffer[] = [];
+    const sub = cw.sse.subscribe(sessionId);
+    void (async () => {
+      try {
+        for await (const chunk of sub) chunks.push(Buffer.from(chunk));
+      } catch { /* expected */ }
+    })();
+
+    const post = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${sessionId}/messages`,
+      payload: { content: "hello" },
+    });
+    expect(post.statusCode).toBe(204);
+
+    // Poll for the title update: the agent run finishes quickly with
+    // the scripted provider, then the fire-and-forget title gen runs.
+    let meta = await store.get(sessionId);
+    for (let i = 0; i < 100; i++) {
+      if (meta && meta.title !== "") break;
+      await new Promise((r) => setTimeout(r, 50));
+      meta = await store.get(sessionId);
+    }
+    expect(meta?.title).toBe("echo test");
+
+    // Verify the SSE event was emitted. The wire format is the SSE
+    // `event: title_updated` frame with a JSON body.
+    const all = Buffer.concat(chunks).toString("utf8");
+    expect(all).toMatch(/event: title_updated/);
+    expect(all).toMatch(/"title"\s*:\s*"echo test"/);
+  });
+
+  it("skips title generation when the session is created with a title", async () => {
+    const store = new SessionStore({ root: sessionsRoot });
+    const app = await buildApp({
+      config: { ...baseConfig, server: { ...baseConfig.server!, port: 4747 } },
+      store,
+      createProvider: scriptedProviderWithTitle,
+      autoApprove: true,
+    });
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/sessions",
+      payload: { title: "My pre-named session" },
+    });
+    const sessionId = create.json().id;
+
+    const post = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${sessionId}/messages`,
+      payload: { content: "hello" },
+    });
+    expect(post.statusCode).toBe(204);
+
+    // Wait long enough for any title gen to have run.
+    await new Promise((r) => setTimeout(r, 500));
+    const meta = await store.get(sessionId);
+    expect(meta?.title).toBe("My pre-named session");
+  });
+});

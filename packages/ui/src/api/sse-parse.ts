@@ -134,6 +134,12 @@ function reconstructServerEvent(
       };
       return out;
     }
+    case "title_updated": {
+      const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
+      const title = typeof body.title === "string" ? body.title : "";
+      if (!sessionId || !title) return null;
+      return { type: "title_updated", sessionId, title };
+    }
     case "error":
       if (typeof body.message === "string") return { type: "error", message: body.message };
       return null;
