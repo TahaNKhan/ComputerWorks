@@ -203,9 +203,11 @@ export class SSEClient {
     this.opts = opts;
   }
 
-  /** Start consuming events. Returns when `stop()` is called or the
-   *  server emits a terminal `done` event. Never throws on transport
-   *  errors — we silently reconnect with backoff. */
+  /** Start consuming events. Returns only when `stop()` is called.
+   *  The server keeps the SSE connection open across turns — a `done`
+   *  event marks the end of one turn, not the end of the stream — so
+   *  we yield `done` and keep consuming. Never throws on transport
+   *  errors; we silently reconnect with backoff. */
   async *events(): AsyncIterable<ServerEvent> {
     while (!this.stopped) {
       this.controller = new AbortController();
@@ -214,7 +216,6 @@ export class SSEClient {
           if (this.stopped) return;
           if (ev.type === "done") {
             this.opts.onDone?.();
-            return;
           }
           yield ev;
         }
