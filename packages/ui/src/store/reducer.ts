@@ -6,7 +6,7 @@
 // zustand, no fetch. The store's `applyServerEvent` action is a
 // one-liner that delegates here.
 //
-// All the helpers (`appendToken`, `appendToolCall`, `applyToolResult`,
+// All the helpers (`appendToken`, `appendToolCall`, `removeToolCall`,
 // `appendPart`, `finalizeStreaming`) are exported alongside the
 // reducer so they can be unit-tested independently. They were
 // previously inlined inside the zustand store; the v1.14 split lets
@@ -120,51 +120,25 @@ export function appendPart(msgs: UiMessage[], part: MessagePart): UiMessage[] {
   return out;
 }
 
-/** Patch a tool_call part with its result + outcome. */
-export function applyToolResult(
-  msgs: UiMessage[],
-  callId: string,
-  info: { approved: boolean; isError: boolean; result?: unknown; reason?: string },
-): UiMessage[] {
+/** Remove the tool_call part (and its associated `approval` card, if
+ *  any) once the tool's fate is decided — `tool_result` for any
+ *  tool, whether approved, rejected, errored, or runtime-failed.
+ *  The chat drops the block; the server-side audit log and the
+ *  on-disk transcript still have the full record. */
+export function removeToolCall(msgs: UiMessage[], callId: string): UiMessage[] {
   const out: UiMessage[] = [];
   for (const m of msgs) {
-    const parts = m.parts.map((p) => {
-      if (p.kind === "tool_call" && p.call.id === callId) {
-        return {
-          ...p,
-          result: info.result,
-          isError: info.isError,
-          approved: info.approved,
-        };
-      }
-      return p;
+    const parts = m.parts.filter((p) => {
+      if (p.kind === "tool_call" && p.call.id === callId) return false;
+      // Drop the approval card that was rendered for the same tool
+      // call (if any). The approval card's `tool.id` matches the
+      // tool_use id we received in `approval_required`.
+      if (p.kind === "approval" && p.tool.id === callId) return false;
+      return true;
     });
-    out.push({ ...m, parts });
+    out.push(parts.length === m.parts.length ? m : { ...m, parts });
   }
   return out;
-}
-
-/** Attach a validation-error string to the matching tool_call part.
- *  Used by the `tool_validation_error` event so the UI can show the
- *  problem inline. No-op when there is no matching part. */
-export function applyValidationError(
-  msgs: UiMessage[],
-  callId: string,
-  message: string,
-): UiMessage[] {
-  let touched = false;
-  const out: UiMessage[] = [];
-  for (const m of msgs) {
-    const parts = m.parts.map((p) => {
-      if (p.kind === "tool_call" && p.call.id === callId) {
-        touched = true;
-        return { ...p, validationError: message };
-      }
-      return p;
-    });
-    out.push({ ...m, parts });
-  }
-  return touched ? out : msgs;
 }
 
 /** Mark the last streaming assistant message as finalized. */
@@ -189,7 +163,9 @@ export function finalizeStreaming(msgs: UiMessage[]): UiMessage[] {
  *   - message_start       begin a new streaming assistant message
  *   - token               append text delta
  *   - tool_call           append a tool_use part
- *   - tool_result         patch the matching tool_call with its outcome
+ *   - tool_result         drop the matching tool_call (and approval
+ *                         card) — the tool's outcome is in, the chat
+ *                         doesn't need to keep showing the block
  *   - approval_required   surface an inline approval card + set status
  *   - message_done        mark the streaming message as finalized
  *   - session_renamed     refresh the matching sidebar entry
@@ -233,12 +209,10 @@ export function reduceStreamEvent(
       break;
     }
     case "tool_result": {
-      nextMsgs = applyToolResult(msgs, ev.call_id, {
-        approved: ev.approved,
-        isError: ev.is_error,
-        result: ev.result,
-        reason: ev.reason,
-      });
+      // Once the tool's outcome is decided, drop the tool_call block
+      // and its approval card from the chat. The server still records
+      // the decision in the audit log and on-disk transcript.
+      nextMsgs = removeToolCall(msgs, ev.call_id);
       break;
     }
     case "approval_required": {

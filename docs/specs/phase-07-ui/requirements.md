@@ -56,6 +56,12 @@ mutating tool is requested.
   session**, **Reject with reason**, **Edit and approve**.
 - FR-15. On rejection the agent receives the rejection reason in the
   next turn.
+- FR-16. Once the tool's outcome is decided (`tool_result` arrives),
+  the corresponding `tool_call` block AND its `ApprovalCard` are
+  dropped from the chat — the block disappears as soon as the
+  decision is made. The server-side audit log and the on-disk
+  transcript still have the full record; this is a UI-only
+  behavior.
 
 ### Controls
 

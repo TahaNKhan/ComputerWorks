@@ -43,6 +43,11 @@ every state transition is testable without rendering a component.
   `approval_required`, `message_done`, `session_renamed`, `done`,
   `error`). It does NOT call the API or update the URL — those stay
   in the store's action methods.
+  - `tool_result` drops the matching `tool_call` block (and any
+    associated `ApprovalCard`) from the message, since the tool's
+    outcome is in and the chat doesn't need to keep showing the
+    block. The server-side audit log and on-disk transcript still
+    have the full record.
 - FR-7. The store's `applyServerEvent` action becomes a one-liner:
   `set((s) => reduceStreamEvent(s, ev))`.
 

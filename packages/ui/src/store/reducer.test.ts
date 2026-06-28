@@ -2,7 +2,7 @@
 // T14.2 — Pure reducer unit tests.
 //
 // Every ServerEvent branch is covered here, plus each cross-cutting
-// helper (appendToken / appendToolCall / applyToolResult /
+// helper (appendToken / appendToolCall / removeToolCall /
 // appendPart / finalizeStreaming). The reducer is pure — no React,
 // no zustand, no fetch — so these run in milliseconds and pin down
 // every state transition the UI relies on.
@@ -12,11 +12,11 @@ import {
   appendPart,
   appendToken,
   appendToolCall,
-  applyToolResult,
   finalizeStreaming,
   initialState,
   messagesOf,
   reduceStreamEvent,
+  removeToolCall,
 } from "./reducer.js";
 import type { ServerEvent, UiMessage } from "../api/types.js";
 
@@ -99,25 +99,31 @@ describe("appendPart", () => {
   });
 });
 
-describe("applyToolResult", () => {
-  it("patches the matching tool_call with its outcome", () => {
+describe("removeToolCall", () => {
+  it("drops the matching tool_call part", () => {
     const base: UiMessage[] = [{
       id: "a-1", role: "assistant", streaming: true,
       parts: [
         { kind: "tool_call", call: { type: "tool_use", id: "c1", name: "run_shell", input: { cmd: "ls" } } },
       ],
     }];
-    const out = applyToolResult(base, "c1", {
-      approved: true,
-      isError: false,
-      result: { stdout: "file.txt\n" },
-    });
-    expect(out[0]!.parts[0]).toMatchObject({
-      kind: "tool_call",
-      approved: true,
-      isError: false,
-      result: { stdout: "file.txt\n" },
-    });
+    const out = removeToolCall(base, "c1");
+    expect(out[0]!.parts).toHaveLength(0);
+  });
+
+  it("also drops the approval card rendered for the same tool call", () => {
+    const base: UiMessage[] = [{
+      id: "a-1", role: "assistant", streaming: true,
+      parts: [
+        { kind: "text", text: "thinking…" },
+        { kind: "tool_call", call: { type: "tool_use", id: "c1", name: "run_shell", input: { cmd: "ls" } } },
+        { kind: "approval", requestId: "r1", tool: { type: "tool_use", id: "c1", name: "run_shell", input: { cmd: "ls" } }, description: "ok" },
+      ],
+    }];
+    const out = removeToolCall(base, "c1");
+    expect(out[0]!.parts).toEqual([
+      { kind: "text", text: "thinking…" },
+    ]);
   });
 
   it("leaves non-matching tool_call parts untouched", () => {
@@ -128,9 +134,9 @@ describe("applyToolResult", () => {
         { kind: "tool_call", call: { type: "tool_use", id: "c2", name: "read_file", input: {} } },
       ],
     }];
-    const out = applyToolResult(base, "c1", { approved: true, isError: false });
-    expect((out[0]!.parts[0] as { approved?: boolean }).approved).toBe(true);
-    expect((out[0]!.parts[1] as { approved?: boolean }).approved).toBeUndefined();
+    const out = removeToolCall(base, "c1");
+    expect(out[0]!.parts).toHaveLength(1);
+    expect((out[0]!.parts[0] as { call: { id: string } }).call.id).toBe("c2");
   });
 });
 
@@ -199,7 +205,7 @@ describe("reduceStreamEvent — tool_call", () => {
 });
 
 describe("reduceStreamEvent — tool_result", () => {
-  it("patches the matching tool_call", () => {
+  it("removes the matching tool_call block from the chat", () => {
     const s = stateWith("s1", [{
       id: "a-1", role: "assistant", streaming: true,
       parts: [{ kind: "tool_call", call: { type: "tool_use", id: "c1", name: "x", input: {} } }],
@@ -211,9 +217,42 @@ describe("reduceStreamEvent — tool_result", () => {
       is_error: false,
       result: "ok",
     });
-    const part = messagesOf(next, "s1")[0]!.parts[0] as { approved?: boolean; result?: unknown };
-    expect(part.approved).toBe(true);
-    expect(part.result).toBe("ok");
+    expect(messagesOf(next, "s1")[0]!.parts).toHaveLength(0);
+  });
+
+  it("removes the matching tool_call AND its approval card", () => {
+    const s = stateWith("s1", [{
+      id: "a-1", role: "assistant", streaming: true,
+      parts: [
+        { kind: "text", text: "thinking…" },
+        { kind: "tool_call", call: { type: "tool_use", id: "c1", name: "run_shell", input: {} } },
+        { kind: "approval", requestId: "r1", tool: { type: "tool_use", id: "c1", name: "run_shell", input: {} }, description: "ok" },
+      ],
+    }]);
+    const next = reduceStreamEvent(s, "s1", {
+      type: "tool_result",
+      call_id: "c1",
+      approved: true,
+      is_error: false,
+      result: "ok",
+    });
+    expect(messagesOf(next, "s1")[0]!.parts).toEqual([
+      { kind: "text", text: "thinking…" },
+    ]);
+  });
+
+  it("leaves the message and other tool calls alone when call_id does not match", () => {
+    const s = stateWith("s1", [{
+      id: "a-1", role: "assistant", streaming: true,
+      parts: [{ kind: "tool_call", call: { type: "tool_use", id: "c2", name: "x", input: {} } }],
+    }]);
+    const next = reduceStreamEvent(s, "s1", {
+      type: "tool_result",
+      call_id: "c1",
+      approved: false,
+      is_error: true,
+    });
+    expect(messagesOf(next, "s1")[0]!.parts).toHaveLength(1);
   });
 });
 

@@ -10,9 +10,8 @@ import {
   appendPart,
   appendToken,
   appendToolCall,
-  applyToolResult,
-  applyValidationError,
   finalizeStreaming,
+  removeToolCall,
 } from "./reducer.js";
 import type { ToolUseBlock, UiMessage } from "../api/types.js";
 
@@ -65,21 +64,57 @@ describe("appendToolCall", () => {
   });
 });
 
-describe("applyToolResult", () => {
-  test("fills in approved + result for matching call id", () => {
-    const m0WithTool: UiMessage = {
+describe("removeToolCall", () => {
+  test("removes the matching tool_call part", () => {
+    const msgs: UiMessage[] = [{
       ...newStreamingMsg(""),
-      parts: [{ kind: "text", text: "" }, { kind: "tool_call", call: SHELL_CALL }],
-    };
-    const updated = applyToolResult([m0WithTool], "call-1", {
-      approved: true,
-      isError: false,
-      result: { stdout: "hi" },
-    });
-    const tc = updated[0]!.parts.find((p) => p.kind === "tool_call") as Extract<UiMessage["parts"][number], { kind: "tool_call" }>;
-    expect(tc.approved).toBe(true);
-    expect(tc.isError).toBe(false);
-    expect(tc.result).toEqual({ stdout: "hi" });
+      parts: [
+        { kind: "text", text: "" },
+        { kind: "tool_call", call: SHELL_CALL },
+      ],
+    }];
+    const out = removeToolCall(msgs, "call-1");
+    expect(out[0]!.parts).toHaveLength(1);
+    expect(out[0]!.parts[0]!.kind).toBe("text");
+  });
+
+  test("also removes the approval card for the same tool call", () => {
+    const msgs: UiMessage[] = [{
+      ...newStreamingMsg(""),
+      parts: [
+        { kind: "text", text: "" },
+        { kind: "tool_call", call: SHELL_CALL },
+        { kind: "approval", requestId: "r1", tool: SHELL_CALL, description: "ok" },
+      ],
+    }];
+    const out = removeToolCall(msgs, "call-1");
+    expect(out[0]!.parts).toHaveLength(1);
+    expect(out[0]!.parts[0]!.kind).toBe("text");
+  });
+
+  test("returns the same message identity when no part matches", () => {
+    const msgs: UiMessage[] = [{
+      ...newStreamingMsg(""),
+      parts: [{ kind: "text", text: "" }],
+    }];
+    const out = removeToolCall(msgs, "call-99");
+    expect(out).toEqual(msgs);
+  });
+
+  test("removes only the matching part when several tool_calls exist", () => {
+    const otherCall: ToolUseBlock = { type: "tool_use", id: "call-2", name: "read_file", input: {} };
+    const msgs: UiMessage[] = [{
+      ...newStreamingMsg(""),
+      parts: [
+        { kind: "text", text: "" },
+        { kind: "tool_call", call: SHELL_CALL },
+        { kind: "tool_call", call: otherCall },
+      ],
+    }];
+    const out = removeToolCall(msgs, "call-1");
+    expect(out[0]!.parts).toHaveLength(2);
+    expect(out[0]!.parts[1]!.kind).toBe("tool_call");
+    expect((out[0]!.parts[1] as Extract<UiMessage["parts"][number], { kind: "tool_call" }>).call.id).toBe("call-2");
   });
 });
 
@@ -108,33 +143,10 @@ describe("finalizeStreaming", () => {
 });
 
 describe("applyValidationError", () => {
-  test("attaches the validation message to the matching tool_call part", () => {
-    const msgs: UiMessage[] = [
-      {
-        id: "a-1",
-        role: "assistant",
-        parts: [
-          { kind: "text", text: "let me read that file" },
-          { kind: "tool_call", call: SHELL_CALL },
-        ],
-      },
-    ];
-    const out = applyValidationError(
-      msgs,
-      "call-1",
-      "Tool 'read_file' was called with invalid arguments:\n- Required at 'path'",
-    );
-    const tc = out[0]!.parts[1] as Extract<
-      UiMessage["parts"][number],
-      { kind: "tool_call" }
-    >;
-    expect(tc.validationError).toMatch(/read_file/);
-    expect(tc.validationError).toMatch(/'path'/);
-  });
-
-  test("no-op when there is no matching tool_call part", () => {
-    const msgs: UiMessage[] = [newStreamingMsg("hi")];
-    const out = applyValidationError(msgs, "call-99", "shouldn't crash");
-    expect(out).toEqual(msgs);
-  });
+  // applyValidationError was removed when tool_validation_error stopped
+  // being part of the wire (validation errors are caught inside the
+  // agent loop, never reach the UI). The validation-error → block-removal
+  // behavior is now expressed by removeToolCall + the loop's own
+  // ToolValidationError handling — covered by the removeToolCall tests
+  // above and the loop tests in packages/agent.
 });
