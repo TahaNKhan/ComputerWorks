@@ -97,3 +97,14 @@ is documented in [[../phase-14-per-message-sse/design]].
 | Per-token re-render jank                   | Token buffer lives in a ref; the DOM is updated directly; only structural changes re-render the list. |
 | Sanitization bypass via crafted HTML       | `rehype-sanitize` default schema; no `script` or `iframe`.                  |
 | External font/CDN dependency breaks offline | Self-hosted fonts only; no `<link>` to third-party origins.                |
+
+## Dev workflow (post-Phase 15)
+
+The original `bun run --filter @computerworks/ui dev` (Vite dev
+server on port 5173, proxying `/api` to the Fastify server) is no
+longer the recommended workflow. [[../phase-15-serve-ui-from-server|Phase 15]]
+unified the UI and server: `bun run build && bun run start` is the
+new one-process, one-port flow. For iteration,
+`bun run dev:watch` rebuilds the UI and restarts the server on
+file changes. There is no HMR — Vite is build-only in this mode;
+refresh the browser after each UI change.

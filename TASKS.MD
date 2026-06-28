@@ -683,7 +683,7 @@ artifact.
     - `bun run build && bun run start` boots a working browser
       session at `http://127.0.0.1:4747`
 
-- [ ] T15.3 — Docs + tests updated, ship #phase15 @ready target:phase15
+- [x] T15.3 — Docs + tests updated, ship #phase15 @ready target:phase15 _done:2026-06-28
   - **Files**: `README.md`, `docs/architecture.md`,
     `docs/specs/phase-07-ui/design.md`,
     `docs/specs/phase-08-e2e-verification/ui-smoke.md`,

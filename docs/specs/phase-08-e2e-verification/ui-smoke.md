@@ -23,13 +23,17 @@ the real server. Run after `bun install` completes.
 
 ## Boot sequence
 
-- [ ] (S1) Start the server: `bun run start` from the repo root.
+> **Phase 15** — the UI is now served by the Fastify server on the
+> same port; no separate Vite process. Build once, then start.
+
+- [ ] (S1) From the repo root, build the UI bundle:
+      `bun run build`. Terminal prints `✓ built in <N>s` (Vite)
+      and `tsc` exits with no errors.
+- [ ] (S2) Start the server: `bun run start` from the repo root.
       The terminal prints
       `ComputerWorks server listening on http://127.0.0.1:4747`
-- [ ] (S2) Start the UI in a second terminal:
-      `bun run --filter @computerworks/ui dev`. Vite prints a local URL,
-      typically `http://localhost:5173/`.
-- [ ] (S3) Open `http://localhost:5173/` in a modern browser
+      and `Serving UI from /…/packages/ui/dist-app`.
+- [ ] (S3) Open `http://127.0.0.1:4747/` in a modern browser
       (Chromium, Firefox, or Safari current). The page renders without
       console errors.
 
@@ -100,9 +104,9 @@ the real server. Run after `bun install` completes.
 
 ## Cleanup
 
-- [ ] (S24) Stop the server (`Ctrl+C` in the server terminal).
-- [ ] (S25) Stop the UI (`Ctrl+C` in the UI terminal).
-- [ ] (S26) Confirm nothing is left listening on port 4747
+- [ ] (S24) Stop the server (`Ctrl+C` in the server terminal). One
+      process — no UI terminal to stop.
+- [ ] (S25) Confirm nothing is left listening on port 4747
       (`lsof -iTCP:4747 -sTCP:LISTEN` returns nothing).
 
 ---

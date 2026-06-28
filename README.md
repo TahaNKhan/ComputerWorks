@@ -46,26 +46,34 @@ survive new terminals.
 
 ## Run
 
-Two processes — the **server** (Fastify + SSE agent) and the **UI**
-(Vite + React). Run them in separate terminals.
+One process. The Fastify server serves both the agent runtime **and**
+the built UI bundle. One URL, one port, one terminal.
 
 ```sh
-# Terminal 1 — server (defaults to http://127.0.0.1:4747)
-bun run start
-
-# Terminal 2 — UI (defaults to http://localhost:5173)
-bun run --filter @computerworks/ui dev
+bun run build      # first time only: build server JS + UI bundle
+bun run start      # boots the server; UI is served from /
 ```
 
-Open <http://localhost:5173> in your browser. The UI talks to the
-server on the same machine — no network exposure.
+Open <http://127.0.0.1:4747> in your browser. The UI and the API
+share an origin — no CORS, no proxy, no separate dev server.
 
-To run only the server without the UI (e.g. for CLI use):
+For iterative UI development (rebuild on change + server restart):
 
 ```sh
-bun run start                     # bind 127.0.0.1:4747
-bun run start -- --port 8080      # different port
-bun run start -- --verbose        # debug logging
+bun run dev:watch
+```
+
+This runs `vite build --watch` and `bun --watch` in parallel;
+refresh the browser after a UI change. There is no HMR (Vite is
+build-only in this mode — see
+[Phase 15 design](docs/specs/phase-15-serve-ui-from-server/design.md)).
+
+Useful flags:
+
+```sh
+bun run start -- --port=8080         # different port
+bun run start -- --verbose           # debug logging
+bun run start -- --ui-root=/path/to  # override UI bundle location
 ```
 
 By design the server **refuses to bind to a non-loopback interface**

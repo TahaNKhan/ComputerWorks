@@ -17,11 +17,12 @@ unless you pass `--allow-non-loopback`.
 
 ```mermaid
 flowchart TB
-    Browser["Browser — packages/ui<br/>React SPA, mobile-first<br/>Pure reducer · zustand store"]
-    Server["Server — packages/server<br/>Fastify on Bun<br/>127.0.0.1:4747 (loopback only by default)"]
+    Browser["Browser<br/>http://127.0.0.1:4747<br/>(React SPA, mobile-first)"]
+    Server["Server — packages/server<br/>Fastify on Bun · @fastify/static<br/>127.0.0.1:4747 (loopback only by default)"]
     Disk["Disk — ~/.computerworks/<br/>config.ts · sessions/&lt;id&gt;/<br/>memory/notes/"]
     Provider["LLM Provider<br/>Anthropic-compatible<br/>Bearer auth via MINIMAX_TOKEN"]
 
+    Browser -- "GET / → index.html<br/>GET /assets/* → UI bundle" --> Server
     Browser -- "POST /api/sessions/:id/messages<br/>(SSE in response)" --> Server
     Browser -- "POST /api/sessions/:id/approve" --> Server
     Server --> Disk

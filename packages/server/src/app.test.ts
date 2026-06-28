@@ -154,10 +154,14 @@ describe("buildApp", () => {
       config: baseConfig,
       store: new SessionStore({ root: sessionsRoot }),
     });
+    // T15.3 — origin now matches the server's own loopback (the UI
+    // is served from the same origin post-Phase 15; this test still
+    // exercises the CORS allowlist for any external client that
+    // happens to also be on loopback).
     const res = await app.inject({
       method: "GET",
       url: "/api/health",
-      headers: { origin: "http://localhost:5173" },
+      headers: { origin: "http://127.0.0.1:4747" },
     });
     expect(res.statusCode).toBe(200);
   });

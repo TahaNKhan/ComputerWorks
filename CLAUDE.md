@@ -85,7 +85,13 @@ ASCII box-drawing in diagrams is forbidden; use Mermaid.
   response, the SSEManager is gone, the UI reducer is a pure function
   tested without rendering any component. See TASKS.MD and the commit
   history for the breakdown.
-- 🎉 Build complete — no further phases planned (Phase 14 was the
+- ✅ Phase 15 — Serve UI from server merged into main on 2026-06-28.
+  Fastify now serves the built UI bundle via @fastify/static; one
+  process, one port (`127.0.0.1:4747`), one URL. `bun run build &&
+  bun run start` is the new workflow; `dev:watch` runs Vite
+  `--watch` and `bun --watch` in parallel for iteration. Vite is
+  build-only (no dev server); the trade-off is no HMR.
+- 🎉 Build complete — no further phases planned (Phase 15 was the
   last architectural change; the codebase is now `main`-only, no
   phase branches)
 
