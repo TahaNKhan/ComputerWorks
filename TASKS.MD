@@ -472,11 +472,11 @@ non-empty (so manual renames + titled-on-create survive).
 
 ## Gates (run continuously)
 
-- [ ] Typecheck gate #gates @ready — every PR (or every push) runs
+- [x] Typecheck gate #gates @ready _done:2026-06-28 — every PR (or every push) runs
   `bun run typecheck` and `bun test`; both must pass.
-- [ ] Lint gate #gates @ready — `eslint` with `@typescript-eslint`
+- [x] Lint gate #gates @ready _done:2026-06-28 — `eslint` with `@typescript-eslint`
   and `eslint-plugin-react` for the UI package.
-- [ ] Dependency hygiene #gates @ready — `bun outdated` reviewed
+- [x] Dependency hygiene #gates @ready _done:2026-06-28 — `bun outdated` reviewed
   before each phase close; no `bun add` of a package with a
   non-MIT/Apache/BSD license without a note in `REQUIREMENTS.MD`.
 
@@ -526,7 +526,7 @@ components (they're thin and verified by the integration tests). We
 frame parser, the router, the shortcut matcher, and the title
 derivation.
 
-- [ ] T14.1 — POST /api/sessions/:id/messages opens SSE directly #phase14 @ready target:phase14
+- [x] T14.1 — POST /api/sessions/:id/messages opens SSE directly #phase14 @ready target:phase14 _done:2026-06-28
   - **Files**:
     `packages/server/src/routes/messages.ts`,
     `packages/server/src/sse-writer.ts` (new),
@@ -557,7 +557,7 @@ derivation.
       `app.inject()` and assert the response is `text/event-stream`
       and contains the expected event frames in order
     - `bun run typecheck && bun test` is green
-- [ ] T14.2 — Pure reducer for SSE events #phase14 @ready target:phase14
+- [x] T14.2 — Pure reducer for SSE events #phase14 @ready target:phase14 _done:2026-06-28
   - **Files**:
     `packages/ui/src/store/reducer.ts` (new),
     `packages/ui/src/store/reducer.test.ts` (new),
@@ -581,7 +581,7 @@ derivation.
       `appendPart`, `finalizeStreaming`)
     - The store's `applyServerEvent` action becomes a one-liner:
       `set((s) => reduceStreamEvent(s, ev))`
-- [ ] T14.3 — UI rewrite: mobile-first, thin components #phase14 @ready target:phase14
+- [x] T14.3 — UI rewrite: mobile-first, thin components #phase14 @ready target:phase14 _done:2026-06-28
   - **Files**: every file under `packages/ui/src/`; `packages/ui/src/styles/global.css`
   - **Deps**: T14.1, T14.2
   - **Done when**:
@@ -607,7 +607,7 @@ derivation.
       ≥44 px; the composer respects `env(safe-area-inset-bottom)`
     - `Cmd/Ctrl+K`, `Cmd/Ctrl+Enter`, `Esc`, `Cmd/Ctrl+,` shortcuts
       still work and are tested via the existing shortcut tests
-- [ ] T14.4 — Tests, docs, ship #phase14 @ready target:phase14
+- [x] T14.4 — Tests, docs, ship #phase14 @ready target:phase14 _done:2026-06-28
   - **Files**: `README.md`, `CLAUDE.md`, the new tests
   - **Deps**: T14.1, T14.2, T14.3
   - **Done when**:
