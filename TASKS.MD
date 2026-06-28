@@ -480,8 +480,154 @@ non-empty (so manual renames + titled-on-create survive).
   before each phase close; no `bun add` of a package with a
   non-MIT/Apache/BSD license without a note in `REQUIREMENTS.MD`.
 
+### Phase 14 — Per-message SSE + UI rewrite
+
+The Phase 5/7 architecture held two long-lived SSE channels open per
+session — one per browser tab — and made the agent loop a background
+side-effect of `POST /messages`. That worked for one user with one tab,
+but it can't scale to multiple concurrent conversations on the same
+session (each new tab fights for the same broadcast queue), it can't
+reliably multiplex approvals and tool events across streams, and the
+frontend reducer entangled event merging with store actions so the UI
+felt jittery on every token burst.
+
+Phase 14 simplifies the wire model end-to-end:
+
+- `POST /api/sessions/:id/messages` now opens an SSE stream **in its
+  own response**. The agent runs synchronously while the response is
+  open; events are written directly to the response stream; the stream
+  closes with a `done` frame when the turn ends. The persistent
+  `GET /api/sessions/:id/stream` route is gone.
+- This means each message gets its own SSE channel — multiple
+  concurrent conversations on the same session are isolated by request
+  lifecycle, not by fanout through a broadcast manager.
+- Approvals still POST to `/approve`, but the resolver is now keyed
+  on `(sessionId, requestId, request)` rather than a global
+  `SSEManager`. The agent turn writes back through a per-request
+  writer callback, so a rejected approval on tab A no longer leaks
+  tool events to tab B's stream.
+
+The UI is rewritten from scratch around two ideas:
+
+1. **Business logic lives outside React.** The SSE-event reducer is a
+   pure function in `store/reducer.ts`. The zustand store delegates to
+   it. Components are presentational; they read state and dispatch
+   actions through typed selectors, but they don't own any state
+   transitions.
+2. **Mobile is the default.** CSS is single-column at every width;
+   the session list is a slide-in drawer; the composer is sticky with
+   `env(safe-area-inset-*)` padding; every tap target is ≥44 px.
+   Tablet/desktop widen the grid to 2 or 3 columns but inherit the
+   same primitives.
+
+Tests follow §2 of the global CLAUDE.md: we don't unit-test
+components (they're thin and verified by the integration tests). We
+**do** unit-test every piece of business logic — the reducer, the SSE
+frame parser, the router, the shortcut matcher, and the title
+derivation.
+
+- [ ] T14.1 — POST /api/sessions/:id/messages opens SSE directly #phase14 @ready target:phase14
+  - **Files**:
+    `packages/server/src/routes/messages.ts`,
+    `packages/server/src/sse-writer.ts` (new),
+    `packages/server/src/sse.ts` (rewrite — drop the manager),
+    `packages/server/src/interactive-approver.ts`,
+    `packages/server/src/app.ts`,
+    `packages/server/src/app.test.ts`
+  - **Deps**: none
+  - **Done when**:
+    - `POST /api/sessions/:id/messages` returns `Content-Type:
+      text/event-stream`, streams `message_start` / `token` / `tool_call`
+      / `tool_result` / `approval_required` / `session_renamed` /
+      `message_done` / `done` / `error` frames in order as the agent
+      runs, and closes the stream after the terminal `done` (or
+      `error`) frame
+    - Multiple in-flight requests on the same session are NOT
+      rejected — each gets its own SSE channel and its own
+      `SessionRuntime`. The previous "409 if busy" guard is removed
+      in favor of "each request owns its turn end-to-end"
+    - `InteractiveApprover` writes events through a `SSEWriter`
+      interface (the per-request response writer) instead of an
+      `SSEManager`. `ApproverRegistry` is removed; the
+      `/approve` route handler holds the `(requestId → resolver)`
+      map for the duration of one turn
+    - The `SSEManager` class, its subscriber/heartbeat machinery, and
+      `routes/stream.ts` are deleted
+    - `app.test.ts` integration test: send a message via
+      `app.inject()` and assert the response is `text/event-stream`
+      and contains the expected event frames in order
+    - `bun run typecheck && bun test` is green
+- [ ] T14.2 — Pure reducer for SSE events #phase14 @ready target:phase14
+  - **Files**:
+    `packages/ui/src/store/reducer.ts` (new),
+    `packages/ui/src/store/reducer.test.ts` (new),
+    `packages/ui/src/store/sessions.ts`,
+    `packages/ui/src/api/types.ts`
+  - **Deps**: none
+  - **Done when**:
+    - `reduceStreamEvent(state, ev): SessionsState` is a pure
+      function — no I/O, no side effects, no React. It takes the
+      current `SessionsState` and one `ServerEvent` and returns the
+      next `SessionsState`. Every branch in the current
+      `reduceEvent` lives here, unchanged in semantics
+    - The reducer is the single source of truth for `message_start`,
+      `token`, `tool_call`, `tool_result`, `approval_required`,
+      `message_done`, `session_renamed`, `done`, and `error`. It does
+      NOT call the API or update the URL — those stay in the store's
+      action methods
+    - `bun test packages/ui/src/store/reducer.test.ts` covers all
+      nine branches plus the cross-cutting helpers
+      (`appendToken`, `appendToolCall`, `applyToolResult`,
+      `appendPart`, `finalizeStreaming`)
+    - The store's `applyServerEvent` action becomes a one-liner:
+      `set((s) => reduceStreamEvent(s, ev))`
+- [ ] T14.3 — UI rewrite: mobile-first, thin components #phase14 @ready target:phase14
+  - **Files**: every file under `packages/ui/src/`; `packages/ui/src/styles/global.css`
+  - **Deps**: T14.1, T14.2
+  - **Done when**:
+    - `App.tsx` is a thin composition root: header + main + modals.
+      No event-handling logic, no store mutation
+    - Components are presentational: each one takes typed props and
+      calls selectors via the store. No `useState` outside the
+      composer (draft text) and the settings dialog (form state)
+    - `SessionList` is a pure renderer over the store's
+      `sessions: SessionMeta[]`. Switch / rename / delete actions are
+      bound to store actions, not implemented in the component
+    - `Composer` is the only place that holds local form state
+      (the draft). Submit calls `sendMessage`; the store opens SSE,
+      consumes events through the reducer, and the chat view updates
+      declaratively
+    - `ChatView` / `MessageList` / `Message` read messages from the
+      store and render them. No streaming awareness in the JSX
+    - `ApprovalCard` reads `pendingApproval` from the store and
+      dispatches `decideApproval`. Buttons are full-width on mobile,
+      side-by-side on desktop
+    - CSS is mobile-first: a single column at < 768 px, two columns
+      at 768–1023 px, three columns at ≥ 1024 px. Tap targets are
+      ≥44 px; the composer respects `env(safe-area-inset-bottom)`
+    - `Cmd/Ctrl+K`, `Cmd/Ctrl+Enter`, `Esc`, `Cmd/Ctrl+,` shortcuts
+      still work and are tested via the existing shortcut tests
+- [ ] T14.4 — Tests, docs, ship #phase14 @ready target:phase14
+  - **Files**: `README.md`, `CLAUDE.md`, the new tests
+  - **Deps**: T14.1, T14.2, T14.3
+  - **Done when**:
+    - All existing tests still pass. New reducer tests cover every
+      event branch and every helper
+    - `README.md` "Architecture" section is updated to describe
+      per-message SSE (no more "GET /api/sessions/:id/stream" line)
+    - `CLAUDE.md` "Phase status" reflects Phase 14 done
+    - `bun run typecheck && bun test` is green
+    - One final commit per task; final push to main per the
+      user-issued override of the "push only to phase branches" rule
+
 ## Up next 👉
 
+After Phase 14 lands, the natural next moves are: cross-session tool
+calls (one session asking another to run a tool), persistent
+multi-tab sync (the new per-message SSE makes this trivially safe —
+each tab opens its own stream), and a structured "edit-and-resend"
+flow (rewind a turn, re-prompt with a modified message). None of
+those are scheduled yet.
 
 ---
 
