@@ -87,6 +87,7 @@ describe("parseSSEFrame", () => {
   test("parses tool_result with optional result and reason", () => {
     const body = JSON.stringify({
       call_id: "abc",
+      tool: "run_shell",
       approved: true,
       is_error: false,
       result: { stdout: "hi", stderr: "", exitCode: 0 },
@@ -95,9 +96,25 @@ describe("parseSSEFrame", () => {
     expect(ev).toEqual({
       type: "tool_result",
       call_id: "abc",
+      tool: "run_shell",
       approved: true,
       is_error: false,
       result: { stdout: "hi", stderr: "", exitCode: 0 },
+    });
+  });
+
+  test("parses tool_validation_error", () => {
+    const body = JSON.stringify({
+      call_id: "abc",
+      tool: "read_file",
+      message: "Tool 'read_file' was called with invalid arguments:\n- Required at 'path'\nCall read_file again with the correct argument shape.",
+    });
+    const ev = parseSSEFrame(`event: tool_validation_error\ndata: ${body}`);
+    expect(ev).toEqual({
+      type: "tool_validation_error",
+      call_id: "abc",
+      tool: "read_file",
+      message: "Tool 'read_file' was called with invalid arguments:\n- Required at 'path'\nCall read_file again with the correct argument shape.",
     });
   });
 
@@ -116,16 +133,17 @@ describe("parseSSEFrame", () => {
     });
   });
 
-  test("parses session_renamed", () => {
-    const body = JSON.stringify({ sessionId: "sess-1", title: "Help with React" });
+  test("parses session_renamed (T14.1)", () => {
+    const body = JSON.stringify({ sessionId: "abc", title: "bun workspace setup" });
     const ev = parseSSEFrame(`event: session_renamed\ndata: ${body}`);
-    expect(ev).toEqual({ type: "session_renamed", sessionId: "sess-1", title: "Help with React" });
+    expect(ev).toEqual({ type: "session_renamed", sessionId: "abc", title: "bun workspace setup" });
   });
 
-  test("returns null for session_renamed with missing sessionId", () => {
-    const body = JSON.stringify({ title: "no id" });
-    const ev = parseSSEFrame(`event: session_renamed\ndata: ${body}`);
-    expect(ev).toBeNull();
+  test("returns null for session_renamed with missing fields", () => {
+    expect(parseSSEFrame("event: session_renamed\ndata: {}")).toBeNull();
+    expect(
+      parseSSEFrame('event: session_renamed\ndata: {"sessionId": "abc"}'),
+    ).toBeNull();
   });
 
   test("returns null for unknown event types", () => {

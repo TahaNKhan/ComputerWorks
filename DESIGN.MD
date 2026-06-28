@@ -31,14 +31,15 @@ fixed.
 
 ```
                 ┌─────────────────────────────────────────────┐
-                │              Browser (React SPA)           │
+                │           Browser (React SPA, mobile-first) │
+                │  Pure reducer · zustand store · components  │
                 │  Session list · Chat · Tool cards · Approve │
                 └────────────────────┬────────────────────────┘
-                                     │  HTTP + SSE (127.0.0.1)
+                                     │  POST /messages (SSE in response)
                 ┌────────────────────▼────────────────────────┐
                 │            Server (Fastify on Bun)          │
-                │  routes · SSE manager · session store       │
-                │  config loader · audit log                  │
+                │  routes · SSE writer (per request)          │
+                │  config loader · audit log · session store  │
                 └───┬─────────────┬─────────────┬─────────────┘
                     │             │             │
         ┌───────────▼──┐   ┌──────▼──────┐   ┌───▼──────────┐
@@ -52,6 +53,50 @@ fixed.
    │ (overrides, streaming) │    │ notes/*.md              │
    └────────────────────────┘    └─────────────────────────┘
 ```
+
+### 2.1 Wire protocol — per-message SSE (v1.14+)
+
+Before v1.14, the browser opened **one persistent SSE connection per
+session** (`GET /api/sessions/:id/stream`) and the server kept that
+connection open across turns using an `SSEManager` that broadcast
+events to all subscribers. Two complications:
+
+1. Two browser tabs on the same session shared one broadcast queue;
+   every event went to every tab, so an approval request opened in
+   tab A was visible to tab B.
+2. The `POST /messages` → `204 No Content` → background-agent pattern
+   required the client to keep a long-lived connection alive across
+   many minutes and reconcile any disconnects.
+
+v1.14 replaces this with **per-message SSE**:
+
+- `POST /api/sessions/:id/messages` opens an SSE response. Events are
+  written directly to that response by the agent loop. The stream
+  closes when the turn ends (terminal `done` or `error` frame).
+- The persistent `GET /stream` route is gone. There is no
+  `SSEManager` — only a small `SSEWriter` helper that owns one
+  response object and serializes frames into it.
+- The interactive approver holds the `(requestId → resolver)` map
+  for the duration of one turn. Approvals are scoped to the
+  originating request — a different tab making a decision resolves
+  the approver for that turn only.
+- Multiple in-flight turns on the same session are NOT supported
+  (one turn at a time per session), but multiple **tabs** on the
+  same session are — each tab holds its own request and its own
+  response stream, and there is no global broadcast step.
+
+### 2.2 UI architecture (v1.14+)
+
+- **Reducer-first state**: the SSE-event reducer in
+  `packages/ui/src/store/reducer.ts` is a pure function
+  `(state, event) → state`. It has no React, no zustand, no fetch.
+- The **zustand store** in `packages/ui/src/store/sessions.ts`
+  delegates `applyServerEvent` to the reducer and owns the network
+  side-effects (POST `/messages`, POST `/approve`, etc.).
+- **Components** are presentational. They select state via
+  typed selectors and dispatch through store actions. No
+  `useState` outside the composer (draft text) and the settings
+  dialog (form state). No event-handling logic in JSX.
 
 ## 3. Monorepo layout
 
@@ -344,10 +389,10 @@ packages/server/src/
 ├── config.ts             # loads ~/.computerworks/config.ts via jiti
 ├── routes/
 │   ├── sessions.ts       # CRUD
-│   ├── messages.ts       # POST /sessions/:id/messages
-│   ├── stream.ts         # GET  /sessions/:id/stream (SSE)
+│   ├── messages.ts       # POST /sessions/:id/messages (SSE in response)
 │   └── approve.ts        # POST /sessions/:id/approve
-├── sse.ts                # SSEManager: per-session subscriber map
+├── sse-writer.ts         # SSEWriter: owns one response, frames events
+├── sse.ts                # pure: formatSSE(frame) → Uint8Array
 ├── session-store.ts      # file-based session store
 ├── audit.ts              # append to audit.jsonl
 ├── tools/
@@ -362,12 +407,19 @@ packages/server/src/
   socket.
 - Only one in-flight `runTurn` per session. A second `POST /messages`
   while one is in flight returns `409 Conflict`.
-- The agent's `onEvent` is wired into the SSE manager, so every
-  `AgentEvent` becomes an SSE `data:` frame.
-- A single `EventSource` per session on the client side; the server
-  buffers nothing for offline clients beyond what Fastify's write
-  buffer provides. If a client misses events, a reconnect replays
-  from `audit.jsonl`.
+- The agent's `onEvent` is wired into an `SSEWriter` that owns the
+  response stream for the current request. Every `AgentEvent`
+  becomes an SSE `data:` frame in that response; the writer flushes
+  on every event and closes the response with a terminal `done`
+  frame when the turn ends.
+- The `InteractiveApprover` writes through the same `SSEWriter`,
+  scoped to the request, so an approval card is delivered to the
+  request that triggered it and never leaks to another connection.
+  The `/approve` route looks up the request's resolver map by
+  `requestId` and resolves it.
+- The client uses a single `fetch()` call per message and pipes the
+  response body through a small SSE-frame parser. There is no
+  `EventSource`, no long-lived connection, no reconnect logic.
 
 ### 8.3 SSE protocol
 
@@ -383,6 +435,7 @@ type ServerEvent =
   | { type: 'tool_result'; call_id: string; approved: boolean;
       result?: unknown; is_error: boolean; reason?: string }
   | { type: 'message_done'; usage: { input: number; output: number } }
+  | { type: 'session_renamed'; sessionId: string; title: string }
   | { type: 'error'; message: string }
   | { type: 'done' };
 ```
@@ -399,8 +452,10 @@ event: error             data: {"message":"…"}
 event: done              data: {}
 ```
 
-A 15-second heartbeat (`":hb\n\n"`) is sent on idle streams to keep
-proxies and load balancers honest.
+A `done` frame is the connection-close marker — clients may treat
+the response stream as terminated once `done` arrives. No
+heartbeats: the request owns its own stream and a single message
+turn never approaches a proxy timeout in practice.
 
 ### 8.4 Routes
 
@@ -413,12 +468,13 @@ proxies and load balancers honest.
 | PATCH  | `/api/sessions/:id`               | Rename / change cwd / model      |
 | DELETE | `/api/sessions/:id`               | Delete session                   |
 | POST   | `/api/sessions/:id/fork`          | Fork at a message id             |
-| POST   | `/api/sessions/:id/messages`      | Send a user message              |
-| GET    | `/api/sessions/:id/stream`        | SSE event stream                 |
+| POST   | `/api/sessions/:id/messages`      | Send a user message (SSE response) |
 | POST   | `/api/sessions/:id/approve`       | Approve / reject a pending tool  |
 | POST   | `/api/sessions/:id/cancel`        | Abort in-flight run              |
 
-All bodies are JSON. All bodies validated with `zod`.
+All bodies are JSON. All bodies validated with `zod`. The
+`/messages` endpoint returns `Content-Type: text/event-stream`;
+all other endpoints return JSON.
 
 ## 9. Session store
 

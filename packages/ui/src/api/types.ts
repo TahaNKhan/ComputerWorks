@@ -158,10 +158,37 @@ export type ServerEvent =
   | {
       type: "tool_result";
       call_id: string;
+      tool: string;
       approved: boolean;
       result?: unknown;
       is_error: boolean;
       reason?: string;
+    }
+  | {
+      /** T12.x — Server emits this when the model called a tool with
+       *  an input shape that failed zod validation (typically the
+       *  model forgot a required field). The UI shows this as an
+       *  inline error attached to the tool_call block — distinct
+       *  from a runtime tool failure shown via `tool_result.is_error`.
+       *  Currently this event is only emitted in tests; the server
+       *  surfaces validation errors through `tool_result` with
+       *  `is_error: true` and `reason: <formatted message>`. We
+       *  keep the type here for parity with the codebase and for
+       *  future use. */
+      type: "tool_validation_error";
+      call_id: string;
+      tool: string;
+      message: string;
+    }
+  | {
+      /** The server has updated the session's title. Triggered by
+       *  the background LLM call after the first turn (skipped if
+       *  the user already named the session), and by any manual
+       *  PATCH /api/sessions/:id. The reducer updates the matching
+       *  session in the sidebar. */
+      type: "session_renamed";
+      sessionId: string;
+      title: string;
     }
   | { type: "message_done"; usage: { input: number; output: number } }
   | { type: "session_renamed"; sessionId: string; title: string }
@@ -172,11 +199,11 @@ export type ServerEvent =
 
 /** A single message rendered in the chat view. We model an assistant
  *  message as a list of `parts` so we can interleave text tokens,
- *  tool calls, tool results, and approval cards in the order they
- *  arrived. */
+ *  tool calls, tool results, validation errors, and approval cards
+ *  in the order they arrived. */
 export type MessagePart =
   | { kind: "text"; text: string }
-  | { kind: "tool_call"; call: ToolUseBlock; result?: unknown; isError?: boolean; approved?: boolean }
+  | { kind: "tool_call"; call: ToolUseBlock; result?: unknown; isError?: boolean; approved?: boolean; validationError?: string }
   | { kind: "approval"; requestId: string; tool: ToolUseBlock; description: string; diff?: string };
 
 export interface UiMessage {

@@ -56,8 +56,15 @@ pushes. Do not bypass it.
 - ✅ Phase 9 — MiniMax auth fix (LAN deployment followup) done on `phase/9-minimax-auth`
 - ✅ Phase 10 — Mobile-friendly UI (LAN deployment followup) done on `phase/10-mobile-friendly`
 - ✅ Phase 11 — Persist LLM responses to transcript done on `phase/11-persist-responses`
-- ✅ Phase 12 — Session names + URL navigation done on `phase/12-session-names-routing`
-- 🎉 Build complete — no further phases planned
+- ✅ Phase 12 — URL-routable sessions + LLM-generated titles done on `phase/auto`
+  (T12.x tool_validation_error folded in from `phase/12-url-and-titles`)
+- ✅ Phase 14 — Per-message SSE + UI rewrite done on `phase/14-sse-and-ui`,
+  pushed to main per the user-issued override of the
+  "push only to phase branches" rule (CLAUDE.md §5). The architecture
+  shift is large: POST /messages opens its own SSE response, the
+  SSEManager is gone, the UI reducer is a pure function tested
+  without rendering any component. See TASKS.MD and the commit
+  history for the breakdown.
 
 ## CRITICAL: How to update TASKS.MD
 

@@ -1,13 +1,13 @@
 // packages/ui/src/App.tsx
-// Composition root. Wires the layout, the SSE subscription, and the
-// global keyboard shortcuts (Cmd/Ctrl+K session switcher,
-// Cmd/Ctrl+, settings, Esc cancel).
-// T10 — Adds a mobile drawer for the SessionList. On narrow screens
-//        the sidebar is hidden behind a hamburger button; on tablet+
-//        it stays inline.
-// T12.2 — Wires the URL to the active session. On mount, reads
-//         `/s/:id` from the URL and switches to that session (if
-//         it exists). Browser back/forward are wired via popstate.
+// T14.3 — Composition root. Thin: header + main + modals.
+//
+// No event-handling logic, no store mutation, no SSE wiring (that's
+// the store's job). Components are presentational — each one reads
+// state from the store and dispatches via actions.
+//
+// The header has a mobile drawer (hamburger) for the SessionList
+// and a global settings button. On tablet+ the SessionList is
+// always inline.
 
 import React, { useEffect, useState } from "react";
 import { SessionList } from "./components/SessionList.js";
@@ -17,11 +17,11 @@ import { ThemeToggle } from "./components/ThemeToggle.js";
 import { Settings } from "./components/Settings.js";
 import { SessionSwitcher } from "./components/SessionSwitcher.js";
 import { useSessionsStore } from "./store/sessions.js";
-import { subscribeToSession } from "./store/stream.js";
+import { stopActiveStream } from "./store/stream.js";
 import {
-  parseSessionIdFromUrl,
-  replaceSessionInUrl,
-  subscribeToRouteChanges,
+  getSessionFromUrl,
+  setSessionInUrl,
+  subscribeUrlChange,
 } from "./lib/router.js";
 import { useShortcut, shortcutLabel } from "./lib/shortcuts.js";
 
@@ -39,9 +39,6 @@ export function App(): JSX.Element {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   // Auto-close the mobile drawer whenever the active session changes.
-  // The SessionList component fires this by changing the active id;
-  // we listen here so the close happens regardless of how the switch
-  // occurred (drawer click, switcher modal, etc).
   useEffect(() => {
     setDrawerOpen(false);
   }, [activeSessionId]);
@@ -51,29 +48,19 @@ export function App(): JSX.Element {
     void loadSessions();
   }, [loadSessions]);
 
-  // T12.2 — URL-driven session selection.
-  // Two pieces:
-  //   1. On mount + after loadSessions: if the URL is `/s/:id`,
-  //      switch to that session. If the id doesn't exist (or the
-  //      load failed), reset the URL to `/` and show a banner.
-  //   2. Subscribe to popstate so browser back/forward switch sessions.
-  // The dependency array below deliberately re-runs when `sessions`
-  // changes (so a deep link arriving before the list loaded still
-  // activates once the list arrives) and when `loadSessions` /
-  // `switchSession` change identity (re-mount safety).
+  // URL-driven session selection. On mount + after loadSessions:
+  // if the URL has `?session=<id>`, switch to that session. If the
+  // id doesn't exist, clear the URL and show a banner.
   useEffect(() => {
-    const fromUrl = parseSessionIdFromUrl();
+    const fromUrl = getSessionFromUrl();
     if (!fromUrl) {
-      // No deep link — replace the current URL so the next switch
-      // gets a fresh history entry (no stale one from before mount).
-      replaceSessionInUrl(activeSessionId);
+      setSessionInUrl(activeSessionId);
       return;
     }
     if (sessions.some((s) => s.id === fromUrl)) {
       void switchSession(fromUrl);
     } else {
-      // Id from URL doesn't exist; clear the URL and surface the error.
-      replaceSessionInUrl(null);
+      setSessionInUrl(null);
       useSessionsStore.setState({
         errorMessage: `Session not found: ${fromUrl}`,
       });
@@ -83,19 +70,13 @@ export function App(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessions, loadSessions, switchSession]);
 
+  // Browser back/forward — popstate switches sessions.
   useEffect(() => {
-    const unsub = subscribeToRouteChanges((id) => {
+    const unsub = subscribeUrlChange((id: string | null) => {
       void switchSession(id);
     });
     return unsub;
   }, [switchSession]);
-
-  // SSE: open (or replace) the stream whenever the active session changes.
-  useEffect(() => {
-    if (!activeSessionId) return;
-    const ctrl = subscribeToSession(activeSessionId);
-    return () => ctrl.stop();
-  }, [activeSessionId]);
 
   // Global shortcuts.
   useShortcut("switch-session", () => setSwitcherOpen(true));
@@ -103,6 +84,10 @@ export function App(): JSX.Element {
   useShortcut("cancel", () => {
     if (activeSessionId && (status === "streaming" || status === "connecting" || status === "awaiting-approval")) {
       void cancelTurn(activeSessionId);
+    } else {
+      // Always cancel any in-flight stream, even if the status
+      // check above didn't fire (e.g. connecting just transitioned).
+      stopActiveStream();
     }
     setSwitcherOpen(false);
     setSettingsOpen(false);

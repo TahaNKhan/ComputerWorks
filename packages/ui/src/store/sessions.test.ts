@@ -1,5 +1,9 @@
 // packages/ui/src/store/sessions.test.ts
-// Unit tests for the pure reducer helpers in sessions.ts.
+//
+// T14.2 — Pure-helper tests for the reducer helpers. The reducer
+// itself is exercised in `./reducer.test.ts`; this file stays as a
+// thin sanity check on the helpers that compose the streaming
+// message model.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
@@ -7,10 +11,10 @@ import {
   appendToken,
   appendToolCall,
   applyToolResult,
+  applyValidationError,
   finalizeStreaming,
-  useSessionsStore,
-} from "./sessions.js";
-import type { ServerEvent, ToolUseBlock, UiMessage } from "../api/types.js";
+} from "./reducer.js";
+import type { ToolUseBlock, UiMessage } from "../api/types.js";
 
 function newStreamingMsg(text: string = ""): UiMessage {
   return {
@@ -63,9 +67,10 @@ describe("appendToolCall", () => {
 
 describe("applyToolResult", () => {
   test("fills in approved + result for matching call id", () => {
-    const msgs = [newStreamingMsg(""), { kind: "tool_call", call: SHELL_CALL } as never];
-    const m0 = msgs[0]!;
-    const m0WithTool: UiMessage = { ...m0, parts: [{ kind: "text", text: "" }, { kind: "tool_call", call: SHELL_CALL }] };
+    const m0WithTool: UiMessage = {
+      ...newStreamingMsg(""),
+      parts: [{ kind: "text", text: "" }, { kind: "tool_call", call: SHELL_CALL }],
+    };
     const updated = applyToolResult([m0WithTool], "call-1", {
       approved: true,
       isError: false,
@@ -102,220 +107,34 @@ describe("finalizeStreaming", () => {
   });
 });
 
-// ─── SSE reducer (via the public applyServerEvent) ─────────────────────────
-
-describe("applyServerEvent: session_renamed", () => {
-  const SID_A = "sess-A";
-  const SID_B = "sess-B";
-
-  beforeEach(() => {
-    useSessionsStore.setState({
-      sessions: [
-        {
-          id: SID_A,
-          title: "",
-          model: "m",
-          cwd: "/tmp",
-          createdAt: "2026-06-25T00:00:00Z",
-          updatedAt: "2026-06-25T00:00:00Z",
-        },
-        {
-          id: SID_B,
-          title: "Existing",
-          model: "m",
-          cwd: "/tmp",
-          createdAt: "2026-06-25T00:00:00Z",
-          updatedAt: "2026-06-25T00:00:00Z",
-        },
-      ],
-      activeSessionId: null,
-      messagesBySession: {},
-      auditBySession: {},
-      pendingApproval: null,
-      status: "idle",
-      errorMessage: null,
-      initialized: true,
-    });
-  });
-
-  afterEach(() => {
-    useSessionsStore.getState().reset();
-  });
-
-  test("updates only the matching session's title", () => {
-    const ev: ServerEvent = {
-      type: "session_renamed",
-      sessionId: SID_A,
-      title: "Help with React",
-    };
-    useSessionsStore.getState().applyServerEvent(SID_A, ev);
-    const sessions = useSessionsStore.getState().sessions;
-    expect(sessions.find((s) => s.id === SID_A)?.title).toBe("Help with React");
-    expect(sessions.find((s) => s.id === SID_B)?.title).toBe("Existing");
-  });
-
-  test("is a no-op for an unknown session id (does not crash)", () => {
-    const ev: ServerEvent = {
-      type: "session_renamed",
-      sessionId: "does-not-exist",
-      title: "stale",
-    };
-    useSessionsStore.getState().applyServerEvent("does-not-exist", ev);
-    const sessions = useSessionsStore.getState().sessions;
-    expect(sessions).toHaveLength(2);
-    expect(sessions.find((s) => s.id === SID_A)?.title).toBe("");
-  });
-});
-
-// ─── URL sync (T12.2) ──────────────────────────────────────────────────────
-//
-// The store calls navigateToSession / replaceSessionInUrl which read
-// `window.history` + `window.location`. In the bun:test runtime these
-// are undefined, so we install a minimal stub via `globalThis.window`
-// for the duration of this block.
-
-describe("URL sync", () => {
-  // Minimal type for our stub.
-  type StubHistory = {
-    pushed: string[];
-    replaced: string[];
-    pushState(_d: unknown, _u: string, url: string): void;
-    replaceState(_d: unknown, _u: string, url: string): void;
-  };
-  type StubLocation = { pathname: string };
-  type StubWindow = {
-    history: StubHistory;
-    location: StubLocation;
-    addEventListener(type: string, fn: () => void): void;
-    removeEventListener(type: string, fn: () => void): void;
-  };
-
-  let originalWindow: unknown;
-  let stubWindow: StubWindow;
-  let listeners: Array<() => void>;
-
-  beforeEach(() => {
-    listeners = [];
-    stubWindow = {
-      pushed: [],
-      replaced: [],
-      history: {
-        pushed: [],
-        replaced: [],
-        pushState(_d, _u, url) {
-          (stubWindow.history.pushed as string[]).push(url);
-        },
-        replaceState(_d, _u, url) {
-          (stubWindow.history.replaced as string[]).push(url);
-        },
-      },
-      location: { pathname: "/" },
-      addEventListener(_type, fn) {
-        listeners.push(fn);
-      },
-      removeEventListener(_type, fn) {
-        listeners = listeners.filter((l) => l !== fn);
-      },
-    } as StubWindow;
-    originalWindow = (globalThis as { window?: unknown }).window;
-    (globalThis as { window?: unknown }).window = stubWindow;
-    // Reset the store to a known empty state.
-    useSessionsStore.getState().reset();
-  });
-
-  afterEach(() => {
-    if (originalWindow === undefined) {
-      delete (globalThis as { window?: unknown }).window;
-    } else {
-      (globalThis as { window?: unknown }).window = originalWindow;
-    }
-    useSessionsStore.getState().reset();
-  });
-
-  test("switchSession pushes the session URL", async () => {
-    useSessionsStore.setState({
-      sessions: [
-        {
-          id: "abc",
-          title: "",
-          model: "m",
-          cwd: "/tmp",
-          createdAt: "",
-          updatedAt: "",
-        },
-      ],
-    });
-    await useSessionsStore.getState().switchSession("abc");
-    expect(stubWindow.history.pushed).toContain("/s/abc");
-  });
-
-  test("switchSession to null pushes the root URL", async () => {
-    useSessionsStore.setState({ activeSessionId: "abc" });
-    await useSessionsStore.getState().switchSession(null);
-    expect(stubWindow.history.pushed).toContain("/");
-  });
-
-  test("deleteSession of the active session pushes the root URL", async () => {
-    // Stub global fetch so apiDeleteSession's DELETE returns 204.
-    const origFetch = globalThis.fetch;
-    globalThis.fetch = (async () =>
-      new Response(null, { status: 204 })) as typeof fetch;
-    try {
-      useSessionsStore.setState({
-        sessions: [
-          {
-            id: "abc",
-            title: "",
-            model: "m",
-            cwd: "/tmp",
-            createdAt: "",
-            updatedAt: "",
-          },
+describe("applyValidationError", () => {
+  test("attaches the validation message to the matching tool_call part", () => {
+    const msgs: UiMessage[] = [
+      {
+        id: "a-1",
+        role: "assistant",
+        parts: [
+          { kind: "text", text: "let me read that file" },
+          { kind: "tool_call", call: SHELL_CALL },
         ],
-        activeSessionId: "abc",
-      });
-      await useSessionsStore.getState().deleteSession("abc");
-      // active session cleared and URL pushed to root.
-      expect(useSessionsStore.getState().activeSessionId).toBeNull();
-      expect(stubWindow.history.pushed).toContain("/");
-    } finally {
-      globalThis.fetch = origFetch;
-    }
+      },
+    ];
+    const out = applyValidationError(
+      msgs,
+      "call-1",
+      "Tool 'read_file' was called with invalid arguments:\n- Required at 'path'",
+    );
+    const tc = out[0]!.parts[1] as Extract<
+      UiMessage["parts"][number],
+      { kind: "tool_call" }
+    >;
+    expect(tc.validationError).toMatch(/read_file/);
+    expect(tc.validationError).toMatch(/'path'/);
   });
 
-  test("deleteSession of a non-active session does NOT change the URL", async () => {
-    const origFetch = globalThis.fetch;
-    globalThis.fetch = (async () =>
-      new Response(null, { status: 204 })) as typeof fetch;
-    try {
-      useSessionsStore.setState({
-        sessions: [
-          {
-            id: "abc",
-            title: "",
-            model: "m",
-            cwd: "/tmp",
-            createdAt: "",
-            updatedAt: "",
-          },
-          {
-            id: "xyz",
-            title: "",
-            model: "m",
-            cwd: "/tmp",
-            createdAt: "",
-            updatedAt: "",
-          },
-        ],
-        activeSessionId: "abc",
-      });
-      const pushedBefore = stubWindow.history.pushed.length;
-      await useSessionsStore.getState().deleteSession("xyz");
-      // Active session unchanged; nothing was pushed to the URL.
-      expect(useSessionsStore.getState().activeSessionId).toBe("abc");
-      expect(stubWindow.history.pushed.length).toBe(pushedBefore);
-    } finally {
-      globalThis.fetch = origFetch;
-    }
+  test("no-op when there is no matching tool_call part", () => {
+    const msgs: UiMessage[] = [newStreamingMsg("hi")];
+    const out = applyValidationError(msgs, "call-99", "shouldn't crash");
+    expect(out).toEqual(msgs);
   });
 });

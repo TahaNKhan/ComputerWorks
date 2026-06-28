@@ -20,7 +20,10 @@ const singleReplace = z.object({
 });
 
 export const editFileInputSchema = z.object({
-  path: z.string().min(1).describe("File to edit."),
+  path: z.string().min(1).describe(
+    "REQUIRED. File to edit, relative to session cwd or absolute if inside allowed root. " +
+    "This argument MUST be included on every call — omitting it will fail validation."
+  ),
   /** Single-string replace (legacy/simpler shape). */
   oldString: z.string().optional(),
   newString: z.string().optional(),

@@ -414,139 +414,61 @@ User noticed the session transcript (messages.jsonl) only contains the user mess
       tool(tool_result), assistant(text)]` — fails before this
       fix, passes after
 
-### Phase 12 — Session names + URL navigation
+### Phase 12 — URL-routable sessions + LLM-generated titles
 
-User asked for two followups: (1) auto-generate readable session names so the sidebar isn't a wall of opaque ids; (2) put the active session id in the URL so users can deep-link, bookmark, and use browser back/forward to switch sessions.
+Two UX asks that go together: the sidebar's session id should be
+shareable via URL, and the session title should auto-generate
+from the first turn instead of staying blank or "(untitled)".
 
-- [x] T12.1 — Auto-title sessions from first user message #phase12 @ready target:phase12 _done:2026-06-25
-  - **Files**: `packages/server/src/title.ts` (new),
-    `packages/server/src/title.test.ts` (new),
-    `packages/server/src/routes/messages.ts`,
-    `packages/server/src/sse.ts`,
-    `packages/server/src/app.test.ts`,
-    `packages/ui/src/api/types.ts`,
-    `packages/ui/src/store/sessions.ts`,
-    `packages/ui/src/store/sessions.test.ts`
+URL shape: `/?session=<id>` (query param — keeps it a pure SPA,
+no Fastify SPA-fallback needed). Title gen: fire-and-forget
+LLM call after each turn, skipped when the title is already
+non-empty (so manual renames + titled-on-create survive).
+
+- [x] T12.1 — Frontend URL sync (activeSessionId ↔ ?session=<id>) #phase12 @ready target:phase12 _done:2026-06-26
+  - **Files**: `packages/ui/src/lib/router.ts` (new),
+    `packages/ui/src/main.tsx` (mount the router),
+    `packages/ui/src/store/sessions.ts` (write URL on
+    `switchSession` + read URL on init),
+    `packages/ui/src/store/sessions.test.ts` (URL helpers)
   - **Deps**: none
   - **Done when**:
-    - `deriveTitle(content)` returns a short, readable title
-      (≤50 chars at a word boundary, ellipsis on truncation, markdown
-      noise stripped); falls back to `Chat – YYYY-MM-DD HH:MM` if the
-      cleaned content is empty
-    - In `runAgentForSession`, after the user message is persisted
-      and before `runTurn` runs: if `meta.title` is empty, derive a
-      title from `userContent`, `store.patch(sessionId, { title })`,
-      and emit a `session_renamed` SSE event
-    - The hook is idempotent (only fires when title is empty); a
-      manual rename before the first message is preserved
-    - `ServerEvent` union gets `{ type: "session_renamed"; sessionId:
-      string; title: string }` on both server (`sse.ts`) and UI
-      (`api/types.ts`) sides — kept in sync
-    - The UI reducer `reduceEvent` updates the matching entry in
-      `sessions: SessionMeta[]` so the sidebar refreshes in place
-    - Unit tests for `deriveTitle` cover: short, long (truncation),
-      markdown noise, multi-line, empty / whitespace-only (22 tests)
-    - `app.test.ts` regression: after a scripted turn, the SSE
-      stream contains `event: session_renamed` and
-      `GET /api/sessions/:id` shows the derived title
-    - `sessions.test.ts` regression: `reduceEvent` with a
-      `session_renamed` event updates the right session
-- [x] T12.2 — URL-driven active session via History API #phase12 @ready target:phase12 _done:2026-06-25
-  - **Files**: `packages/ui/src/lib/router.ts` (new),
-    `packages/ui/src/lib/router.test.ts` (new),
-    `packages/ui/src/store/sessions.ts`,
-    `packages/ui/src/store/sessions.test.ts`,
-    `packages/ui/src/App.tsx`
+    - `router.ts` exposes: `getSessionFromUrl()`,
+      `setSessionInUrl(id | null)`,
+      `subscribeUrlChange(cb)` (popstate-driven)
+    - On app boot: `getSessionFromUrl()` reads the param; if it
+      names a real session in the loaded list, that becomes the
+      active session. If it names an unknown id, the param is
+      cleared and an error toast surfaces.
+    - `switchSession(id)` writes the new id via `pushState` so
+      the browser back button walks the session history.
+    - `popstate` (user clicking back/forward) updates
+      `activeSessionId` accordingly.
+    - Visiting `/` with no param shows the empty state.
+
+- [x] T12.2 — Backend LLM-generated session titles #phase12 @ready target:phase12 _done:2026-06-26
+  - **Files**: `packages/server/src/title-generator.ts` (new),
+    `packages/server/src/routes/messages.ts` (call after runTurn),
+    `packages/server/src/sse.ts` (add `title_updated` event),
+    `packages/ui/src/api/types.ts` +
+    `packages/ui/src/store/sessions.ts` (consume the new event)
   - **Deps**: T12.1
   - **Done when**:
-    - `router.ts` exposes `parseSessionIdFromPath`,
-      `parseSessionIdFromUrl`, `navigateToSession(id)`,
-      `replaceSessionInUrl(id)`, and `subscribeToRouteChanges(handler)`
-    - URL shape is `/s/:id`; root `/` means no active session
-    - `switchSession`, `createSession`, `deleteSession` in the store
-      sync the URL via `navigateToSession`; `popstate` is wired so
-      browser back/forward switches sessions
-    - On initial load with `/s/:id`: if the session exists,
-      `activeSessionId` is set; if it doesn't, the URL is replaced
-      with `/` and an error banner surfaces
-    - Tests for the router cover parsing, push/replace, and the
-      `popstate` subscription (no-op in non-browser env)
-    - Tests for the store cover the URL side-effect on the three
-      mutating actions (via a stubbed `window.history` + `fetch`)
-
-### Phase 13 — Windows path compatibility (LAN deployment followup)
-
-User opened the repo on Windows and asked to make it work natively (not via WSL). The audit found hardcoded `/tmp`, `/bin/bash`, `vi`, an inverted `COMSPEC` probe in `tools-shell`, POSIX-only test commands, and Unix-only path assertions. Baseline `bun test` was 220 pass / 6 fail / 1 timeout on Windows — every failure was a path/platform issue, not a logic bug.
-
-- [ ] T13.1 — Make production code cross-platform #phase13 @ready target:phase13
-  - **Files**:
-    `packages/tools-shell/src/index.ts`,
-    `packages/server/src/system-prompt.ts`,
-    `packages/server/src/config.ts`,
-    `packages/cli/src/commands/memory.ts`,
-    `packages/memory-files/src/index.ts`,
-    `packages/tools-files/src/path-safety.ts`,
-    `packages/server/src/start.ts`,
-    `packages/cli/src/serve.ts`,
-    `scripts/e2e.ts`
-  - **Deps**: none
-  - **Done when**:
-    - `tools-shell`: PowerShell probe prefers `pwsh` over `powershell.exe`
-      (the existing `COMSPEC` probe was inverted and always picked
-      `powershell.exe`); `bash` resolved via PATH instead of hardcoded
-      `/bin/bash`; kill signal passes `undefined` on Windows so libuv
-      uses `TerminateProcess`
-    - `system-prompt`: shell-safety hints are platform-conditional —
-      PowerShell-flavoured wording on Windows, `ls`/`sh`/`eval`
-      wording on Unix
-    - `config.ts`: `shellDenylist` default adds ~6 Windows destructive
-      patterns (`Remove-Item -Recurse -Force`, `Format-Volume`,
-      `rd /s /q`, `reg delete HKEY`, etc.) alongside the 4 POSIX ones
-    - `cli/commands/memory.ts`: temp-file path uses `os.tmpdir()`;
-      editor fallback is `notepad.exe` on Windows / `vi` on Unix;
-      `homedir()` joined via `node:path.join` instead of literal `/`
-    - `memory-files`: `.md` filter is case-insensitive (so
-      `Foo.MD` files written by external tools on Windows aren't
-      silently skipped); path-escape prefix check lowercases both sides
-      to match Windows' case-insensitive filesystem
-    - `tools-files/path-safety.ts`: literal `"\\"` replaced with
-      `path.sep`
-    - `start.ts` / `serve.ts`: `SIGHUP` handler added alongside
-      `SIGINT`/`SIGTERM` for parity with POSIX shutdown signals
-    - `e2e.ts`: scripted shell command branches on `process.platform`
-  - **Acceptance**: `bun run typecheck && bun test` is at the same
-    baseline on Windows (the 6 test failures are addressed in T13.2)
-- [ ] T13.2 — Make test code cross-platform #phase13 @ready target:phase13
-  - **Files**: every `*.test.ts` that uses `cwd: "/tmp"` or
-    `startsWith("/")` assertions, plus `tools-shell/src/index.test.ts`
-    POSIX-only commands
-  - **Deps**: T13.1
-  - **Done when**:
-    - Every `cwd: "/tmp"` site in test fixtures uses `os.tmpdir()` or
-      a per-test `mkdtempSync` subdirectory
-    - `startsWith("/")` assertions in `config.test.ts` and
-      `session-store.test.ts` use `path.isAbsolute(...)` instead
-    - `expandHome("~/foo/bar").endsWith("foo/bar")` is platform-agnostic
-      via `path.sep`
-    - `tools-shell/src/index.test.ts` `echo to stderr >&2; exit 7`,
-      `sleep N`, `yes A | head -c N` commands branch on
-      `process.platform`
-    - `core/src/secret-leak.test.ts` uses `path.relative(REPO_ROOT, p)`
-      instead of `path.replace(REPO_ROOT + "/", "")`
-    - `tools-files/src/index.test.ts` absolute-path-outside-cwd test
-      uses a Windows-portable absolute path
-    - **Acceptance**: `bun test` is 226 pass / 0 fail on Windows
-- [ ] T13.3 — Update docs for Windows support #phase13 @ready target:phase13
-  - **Files**: `README.md`, `CLAUDE.md`
-  - **Deps**: T13.2
-  - **Done when**:
-    - README "Install" section lists Windows alongside macOS/Linux/WSL
-      and points to System Properties → Environment Variables for env
-      setup
-    - CLAUDE.md "Phase status" reflects Phase 13 done
-    - No new commit references old "Unix-like shell" wording
-  - **Acceptance**: docs-only commit; `bun run typecheck && bun test`
-    unchanged
+    - `generateTitle(deps, sessionId)` reads the first user
+      message + first assistant text from the store, calls
+      `provider.chat` once with a "summarize as 3-5 word title"
+      prompt, sanitizes the result (strip quotes/whitespace,
+      truncate to 80 chars), and PATCHes `meta.title`.
+    - Skipped entirely if `meta.title` is already non-empty
+      (manual rename or `createSession({ title })`).
+    - Failures (LLM error, no messages yet) are logged and
+      swallowed — the user experience never blocks on a title.
+    - On success: emits a `title_updated` SSE event on the
+      session's stream with `{ sessionId, title }`. The UI
+      reducer updates the session in `sessions` and (if it's
+      the active one) the meta header.
+    - Unit test for the title sanitizer + a server test that
+      asserts the PATCH happens and the SSE event is emitted.
 
 ## Gates (run continuously)
 
@@ -558,8 +480,154 @@ User opened the repo on Windows and asked to make it work natively (not via WSL)
   before each phase close; no `bun add` of a package with a
   non-MIT/Apache/BSD license without a note in `REQUIREMENTS.MD`.
 
+### Phase 14 — Per-message SSE + UI rewrite
+
+The Phase 5/7 architecture held two long-lived SSE channels open per
+session — one per browser tab — and made the agent loop a background
+side-effect of `POST /messages`. That worked for one user with one tab,
+but it can't scale to multiple concurrent conversations on the same
+session (each new tab fights for the same broadcast queue), it can't
+reliably multiplex approvals and tool events across streams, and the
+frontend reducer entangled event merging with store actions so the UI
+felt jittery on every token burst.
+
+Phase 14 simplifies the wire model end-to-end:
+
+- `POST /api/sessions/:id/messages` now opens an SSE stream **in its
+  own response**. The agent runs synchronously while the response is
+  open; events are written directly to the response stream; the stream
+  closes with a `done` frame when the turn ends. The persistent
+  `GET /api/sessions/:id/stream` route is gone.
+- This means each message gets its own SSE channel — multiple
+  concurrent conversations on the same session are isolated by request
+  lifecycle, not by fanout through a broadcast manager.
+- Approvals still POST to `/approve`, but the resolver is now keyed
+  on `(sessionId, requestId, request)` rather than a global
+  `SSEManager`. The agent turn writes back through a per-request
+  writer callback, so a rejected approval on tab A no longer leaks
+  tool events to tab B's stream.
+
+The UI is rewritten from scratch around two ideas:
+
+1. **Business logic lives outside React.** The SSE-event reducer is a
+   pure function in `store/reducer.ts`. The zustand store delegates to
+   it. Components are presentational; they read state and dispatch
+   actions through typed selectors, but they don't own any state
+   transitions.
+2. **Mobile is the default.** CSS is single-column at every width;
+   the session list is a slide-in drawer; the composer is sticky with
+   `env(safe-area-inset-*)` padding; every tap target is ≥44 px.
+   Tablet/desktop widen the grid to 2 or 3 columns but inherit the
+   same primitives.
+
+Tests follow §2 of the global CLAUDE.md: we don't unit-test
+components (they're thin and verified by the integration tests). We
+**do** unit-test every piece of business logic — the reducer, the SSE
+frame parser, the router, the shortcut matcher, and the title
+derivation.
+
+- [ ] T14.1 — POST /api/sessions/:id/messages opens SSE directly #phase14 @ready target:phase14
+  - **Files**:
+    `packages/server/src/routes/messages.ts`,
+    `packages/server/src/sse-writer.ts` (new),
+    `packages/server/src/sse.ts` (rewrite — drop the manager),
+    `packages/server/src/interactive-approver.ts`,
+    `packages/server/src/app.ts`,
+    `packages/server/src/app.test.ts`
+  - **Deps**: none
+  - **Done when**:
+    - `POST /api/sessions/:id/messages` returns `Content-Type:
+      text/event-stream`, streams `message_start` / `token` / `tool_call`
+      / `tool_result` / `approval_required` / `session_renamed` /
+      `message_done` / `done` / `error` frames in order as the agent
+      runs, and closes the stream after the terminal `done` (or
+      `error`) frame
+    - Multiple in-flight requests on the same session are NOT
+      rejected — each gets its own SSE channel and its own
+      `SessionRuntime`. The previous "409 if busy" guard is removed
+      in favor of "each request owns its turn end-to-end"
+    - `InteractiveApprover` writes events through a `SSEWriter`
+      interface (the per-request response writer) instead of an
+      `SSEManager`. `ApproverRegistry` is removed; the
+      `/approve` route handler holds the `(requestId → resolver)`
+      map for the duration of one turn
+    - The `SSEManager` class, its subscriber/heartbeat machinery, and
+      `routes/stream.ts` are deleted
+    - `app.test.ts` integration test: send a message via
+      `app.inject()` and assert the response is `text/event-stream`
+      and contains the expected event frames in order
+    - `bun run typecheck && bun test` is green
+- [ ] T14.2 — Pure reducer for SSE events #phase14 @ready target:phase14
+  - **Files**:
+    `packages/ui/src/store/reducer.ts` (new),
+    `packages/ui/src/store/reducer.test.ts` (new),
+    `packages/ui/src/store/sessions.ts`,
+    `packages/ui/src/api/types.ts`
+  - **Deps**: none
+  - **Done when**:
+    - `reduceStreamEvent(state, ev): SessionsState` is a pure
+      function — no I/O, no side effects, no React. It takes the
+      current `SessionsState` and one `ServerEvent` and returns the
+      next `SessionsState`. Every branch in the current
+      `reduceEvent` lives here, unchanged in semantics
+    - The reducer is the single source of truth for `message_start`,
+      `token`, `tool_call`, `tool_result`, `approval_required`,
+      `message_done`, `session_renamed`, `done`, and `error`. It does
+      NOT call the API or update the URL — those stay in the store's
+      action methods
+    - `bun test packages/ui/src/store/reducer.test.ts` covers all
+      nine branches plus the cross-cutting helpers
+      (`appendToken`, `appendToolCall`, `applyToolResult`,
+      `appendPart`, `finalizeStreaming`)
+    - The store's `applyServerEvent` action becomes a one-liner:
+      `set((s) => reduceStreamEvent(s, ev))`
+- [ ] T14.3 — UI rewrite: mobile-first, thin components #phase14 @ready target:phase14
+  - **Files**: every file under `packages/ui/src/`; `packages/ui/src/styles/global.css`
+  - **Deps**: T14.1, T14.2
+  - **Done when**:
+    - `App.tsx` is a thin composition root: header + main + modals.
+      No event-handling logic, no store mutation
+    - Components are presentational: each one takes typed props and
+      calls selectors via the store. No `useState` outside the
+      composer (draft text) and the settings dialog (form state)
+    - `SessionList` is a pure renderer over the store's
+      `sessions: SessionMeta[]`. Switch / rename / delete actions are
+      bound to store actions, not implemented in the component
+    - `Composer` is the only place that holds local form state
+      (the draft). Submit calls `sendMessage`; the store opens SSE,
+      consumes events through the reducer, and the chat view updates
+      declaratively
+    - `ChatView` / `MessageList` / `Message` read messages from the
+      store and render them. No streaming awareness in the JSX
+    - `ApprovalCard` reads `pendingApproval` from the store and
+      dispatches `decideApproval`. Buttons are full-width on mobile,
+      side-by-side on desktop
+    - CSS is mobile-first: a single column at < 768 px, two columns
+      at 768–1023 px, three columns at ≥ 1024 px. Tap targets are
+      ≥44 px; the composer respects `env(safe-area-inset-bottom)`
+    - `Cmd/Ctrl+K`, `Cmd/Ctrl+Enter`, `Esc`, `Cmd/Ctrl+,` shortcuts
+      still work and are tested via the existing shortcut tests
+- [ ] T14.4 — Tests, docs, ship #phase14 @ready target:phase14
+  - **Files**: `README.md`, `CLAUDE.md`, the new tests
+  - **Deps**: T14.1, T14.2, T14.3
+  - **Done when**:
+    - All existing tests still pass. New reducer tests cover every
+      event branch and every helper
+    - `README.md` "Architecture" section is updated to describe
+      per-message SSE (no more "GET /api/sessions/:id/stream" line)
+    - `CLAUDE.md` "Phase status" reflects Phase 14 done
+    - `bun run typecheck && bun test` is green
+    - One final commit per task; final push to main per the
+      user-issued override of the "push only to phase branches" rule
+
 ## Up next 👉
 
+After Phase 14 lands, the natural next moves are: cross-session tool
+calls (one session asking another to run a tool), persistent
+multi-tab sync (the new per-message SSE makes this trivially safe —
+each tab opens its own stream), and a structured "edit-and-resend"
+flow (rewind a turn, re-prompt with a modified message). None of
+those are scheduled yet.
 
 ---
 

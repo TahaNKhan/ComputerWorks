@@ -8,6 +8,7 @@ export * from "./config.js";
 export * from "./session-store.js";
 export * from "./audit.js";
 export * from "./sse.js";
+export * from "./sse-writer.js";
 export * from "./interactive-approver.js";
 export * from "./session-runtime.js";
 export * from "./system-prompt.js";

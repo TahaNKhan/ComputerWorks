@@ -1,5 +1,5 @@
 // packages/server/src/routes/cancel.ts
-// T5.8 — POST /api/sessions/:id/cancel aborts the in-flight turn.
+// T5.8 + T14.1 — POST /api/sessions/:id/cancel aborts the in-flight run.
 //
 // Looks up the session's runtime, calls abort() on its AbortController,
 // and returns 204. If no turn is in flight for the session, returns

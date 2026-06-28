@@ -8,8 +8,11 @@ import type { ToolDefinition } from "@computerworks/core";
 import { resolveSafe } from "./path-safety.js";
 
 export const writeFileInputSchema = z.object({
-  path: z.string().min(1).describe("File to write. Relative to session cwd, or absolute if inside allowed root."),
-  content: z.string().describe("UTF-8 content to write."),
+  path: z.string().min(1).describe(
+    "REQUIRED. File to write, relative to session cwd or absolute if inside allowed root. " +
+    "This argument MUST be included on every call — omitting it will fail validation."
+  ),
+  content: z.string().describe("REQUIRED. UTF-8 content to write."),
   /** Normalize line endings to LF. Default true (REQUIREMENTS §4.2). */
   normalizeEol: z.boolean().optional().default(true),
 });

@@ -143,7 +143,14 @@ markdown chat UI.
 
 ### 4.5 UI
 
-- **Layout**: three-pane — session list (left), chat (center), tool/approval panel (right, collapsible).
+- **Layout (v1.14+)**: mobile-first. A single column on phones
+  (session list collapses behind a hamburger drawer); two columns on
+  tablet (≥ 768 px); three columns on desktop (≥ 1024 px) with a
+  right rail for tool / approval detail.
+- **State ownership**: business logic lives in a pure reducer
+  (`store/reducer.ts`); the zustand store delegates to it; React
+  components are presentational. This lets us unit-test every state
+  transition without rendering any component.
 - **Markdown** (must-have):
   - GitHub-flavored markdown via `react-markdown` + `remark-gfm`.
   - Syntax-highlighted code blocks via `shiki` (or `rehype-highlight`).
@@ -158,6 +165,10 @@ markdown chat UI.
 - **Keyboard shortcuts**: `Cmd/Ctrl+K` switch sessions, `Cmd/Ctrl+Enter` send, `Esc` cancel generation.
 - **Theme**: light + dark, system-preference default.
 - **No telemetry**, no external fonts/CDNs by default — works fully offline once installed.
+- **Tap targets**: every interactive element is ≥ 44 × 44 px so the
+  UI is comfortable on touch screens without zooming. The composer
+  uses `env(safe-area-inset-bottom)` to stay clear of the iPhone
+  home indicator.
 
 ### 4.6 Memory (v1, file-based)
 
@@ -178,6 +189,35 @@ markdown chat UI.
 - Available memory is auto-injected into the system prompt as a list (title + first ~200 chars), with the agent able to `read_memory` for full content.
 - The system prompt instructs the agent that it may write to memory when it learns something likely useful across sessions (preferences, recurring project facts).
 - A `MemoryProvider` interface (`search`, `read`, `write`, `list`) is defined so a vector backend can be added later without changing the agent.
+
+### 4.8 Wire protocol (v1.14+)
+
+- **Per-message SSE** (replaces the persistent session-stream model
+  used in v1.0–v1.13). Each `POST /api/sessions/:id/messages` request
+  opens an SSE stream **in its own response body**. The agent turn
+  runs while the response is open; events are written directly to
+  the response; the response closes with a `done` (or `error`)
+  frame when the turn ends.
+- This means multiple concurrent conversations on the same session
+  are isolated by request lifecycle, not by a shared broadcast
+  manager — each gets its own stream, its own `AbortController`,
+  and its own approver registry.
+- The browser client uses `fetch()` + `response.body.getReader()`
+  to consume the stream. There is no separate `GET /stream` route;
+  clients never need to maintain a long-lived connection.
+- **Approval sub-flow**: when the server needs a human decision, the
+  stream emits an `approval_required` frame and pauses the agent
+  loop. The client POSTs the decision to
+  `/api/sessions/:id/approve`. The server keys the resolver on
+  `(sessionId, requestId)` scoped to the in-flight request, so a
+  decision from one tab never resolves an approval on another.
+- **Concurrency invariants**:
+  - A session may have at most one in-flight message request per
+    browser tab; the server enforces this with `SessionRegistry`
+    (a per-session `AbortController`).
+  - The server emits `message_start` exactly once at the beginning
+    of a turn and `done` (or `error`) exactly once at the end.
+    Clients may treat `done` as the connection-close marker.
 
 ### 4.7 Configuration
 

@@ -12,13 +12,22 @@ export function ToolCallBlock({ part }: Props): JSX.Element {
   const inputStr = renderInput(part.call.input);
   const resultStr = renderResult(part.result);
   const isError = part.isError === true;
+  const validationError = part.validationError;
   return (
-    <details className={`cw-tool-call ${isError ? "error" : ""}`}>
+    <details
+      className={`cw-tool-call ${isError ? "error" : ""} ${validationError ? "validation-error" : ""}`}
+      open={validationError ? true : undefined}
+    >
       <summary>
         <span className="cw-tool-icon">⚙</span>
         <span className="cw-tool-name">{part.call.name}</span>
         {part.approved === false && (
           <span className="cw-tool-badge cw-tool-badge-rejected">rejected</span>
+        )}
+        {validationError && (
+          <span className="cw-tool-badge cw-tool-badge-validation">
+            bad input
+          </span>
         )}
         {isError && <span className="cw-tool-badge cw-tool-badge-error">error</span>}
       </summary>
@@ -26,6 +35,12 @@ export function ToolCallBlock({ part }: Props): JSX.Element {
         <div className="cw-tool-label">input</div>
         <pre className="cw-tool-pre">{inputStr}</pre>
       </div>
+      {validationError && (
+        <div className="cw-tool-section cw-tool-section-error">
+          <div className="cw-tool-label">validation error</div>
+          <pre className="cw-tool-pre">{validationError}</pre>
+        </div>
+      )}
       {resultStr !== null && (
         <div className="cw-tool-section">
           <div className="cw-tool-label">result</div>

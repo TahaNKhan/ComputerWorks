@@ -1,28 +1,42 @@
 // packages/server/src/routes/messages.ts
-// T5.7 — POST /api/sessions/:id/messages kicks off a turn.
+// T14.1 — POST /api/sessions/:id/messages opens an SSE stream in its
+// own response and writes events to it as the agent runs.
 //
-// On success: returns 204 immediately and runs the turn in the
-// background, streaming events via the SSE manager. On a busy session
-// (a turn is already in flight) returns 409 Conflict.
+// v1.0–v1.13 returned 204 immediately and ran the agent in the
+// background while a separate GET /api/sessions/:id/stream route
+// served the events. v1.14 collapses that into one request: the
+// response itself is the SSE channel.
 //
-// The actual agent invocation lives in runAgentForSession() so we can
-// test it with app.inject() without going through HTTP.
+// Lifecycle:
+//   - POST arrives → set text/event-stream headers → hijack the reply
+//   - build an SSEWriter wrapping the reply
+//   - start the agent loop; every onEvent goes to the writer
+//   - when the loop completes (or errors) write the terminal frame
+//     and end the response
+//   - if the client disconnects mid-run, the writer flips `closed`
+//     and the loop's AbortSignal fires (see session-runtime + agent
+//     loop)
+//
+// The InteractiveApprover is registered on the SessionRuntime so
+// /approve can find its (requestId → resolver) map without a global
+// registry.
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { z } from "zod";
-import { runTurn, AutoApprover, type Approver } from "@computerworks/agent";
+import { runTurn, AutoApprover, type Approver, type AgentEvent } from "@computerworks/agent";
 import type {
   Message, Provider, ProviderOverrides, ToolDefinition,
 } from "@computerworks/core";
-import { InteractiveApprover, ApproverRegistry } from "../interactive-approver.js";
+import { InteractiveApprover } from "../interactive-approver.js";
 import { ToolRegistry } from "@computerworks/agent";
-import { SessionRegistry } from "../session-runtime.js";
+import { SessionRegistry, type SessionRuntime } from "../session-runtime.js";
 import { SessionStore } from "../session-store.js";
-import { SSEManager, type ServerEvent } from "../sse.js";
+import { createSSEWriter, type SSEWriter } from "../sse-writer.js";
+import type { ServerEvent } from "../sse.js";
 import type { Config } from "../config.js";
 import { buildSystemPrompt } from "../system-prompt.js";
 import { defaultTools } from "../tools/index.js";
-import { deriveTitle } from "../title.js";
+import { generateTitle } from "../title-generator.js";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -41,9 +55,7 @@ const MessageBody = z.object({
 
 export interface RunAgentDeps {
   store: SessionStore;
-  sse: SSEManager;
   registry: SessionRegistry;
-  approvers: ApproverRegistry;
   config: Config;
   /** Provider factory: given overrides, returns a Provider instance. */
   createProvider: (overrides?: ProviderOverrides) => Provider;
@@ -54,22 +66,21 @@ function defaultMemoryRoot(): string {
 }
 
 /**
- * Run an agent turn for a single user message.
+ * Run an agent turn for a single user message, streaming events to
+ * `writer`. Returns the number of agent events emitted (excluding
+ * the final `done`).
  *
- * @returns the number of agent events emitted (excluding the final `done`)
+ * Public so tests can exercise it without going through HTTP.
  */
 export async function runAgentForSession(
   deps: RunAgentDeps,
   sessionId: string,
   userContent: string,
+  writer: SSEWriter,
+  runtime: SessionRuntime,
   perRequestOverrides?: ProviderOverrides,
   options: { autoApprove?: boolean } = {},
 ): Promise<number> {
-  const start = deps.registry.startIfIdle(sessionId);
-  if (start.busy) {
-    throw new Error("busy");
-  }
-  const { runtime } = start;
   const signal = runtime.controller.signal;
 
   try {
@@ -81,29 +92,11 @@ export async function runAgentForSession(
     const meta = await deps.store.get(sessionId);
     if (!meta) throw new Error("session disappeared");
 
-    // Auto-title on the first message. Idempotent: only fires when
-    // the session has no title yet, so a manual rename made before
-    // the first turn is preserved. The SSE event arrives before the
-    // agent stream starts, so the sidebar updates in lockstep with
-    // the user's send.
-    if (!meta.title) {
-      const title = await deriveTitle(userContent);
-      const updated = await deps.store.patch(sessionId, { title });
-      deps.sse.send(sessionId, {
-        type: "session_renamed",
-        sessionId,
-        title: updated.title,
-      });
-    }
-
     const provider = deps.createProvider(perRequestOverrides);
     const memoryRoot = meta.memoryRoot ?? defaultMemoryRoot();
     const { tools, memory } = defaultTools({ memoryRoot });
 
-    const model =
-      perRequestOverrides && "apiKey" in perRequestOverrides
-        ? meta.model
-        : meta.model;
+    const model = meta.model;
 
     const system = await buildSystemPrompt({
       memory,
@@ -111,22 +104,19 @@ export async function runAgentForSession(
       model,
     });
 
-    // Load prior history (sync via listMessages helper or async iter).
+    // Load prior history.
     const history: Message[] = [];
     for await (const m of deps.store.readMessages(sessionId)) history.push(m);
-    // Messages appended by runTurn (assistant text, tool calls, tool
-    // results) start at this index. Everything before is pre-existing.
     const initialHistoryLength = history.length;
 
     let approver: Approver;
     if (options.autoApprove) {
       approver = new AutoApprover(() => ({ kind: "approve_once" }));
     } else {
-      const ia = new InteractiveApprover(deps.sse, sessionId, [], [], {
-        timeoutMs: 5 * 60_000,
-      });
-      approver = ia;
-      deps.approvers.register(ia);
+      // The InteractiveApprover was constructed in the route handler
+      // and stored on the runtime. It IS the `Approver` interface
+      // (and more — it has `resolveById` for the /approve route).
+      approver = runtime.approver as unknown as Approver;
     }
 
     const toolRegistry = new ToolRegistry();
@@ -143,8 +133,10 @@ export async function runAgentForSession(
         approver,
         signal,
         maxIterations: 25,
-        onEvent: (ev) => {
+        onEvent: (ev: AgentEvent) => {
           eventCount++;
+          // Persist an audit entry for every tool_result so the
+          // on-disk log captures the decision (matches Phase 5).
           if (ev.type === "tool_result") {
             void deps.store.appendAudit(sessionId, {
               ts: new Date().toISOString(),
@@ -157,32 +149,60 @@ export async function runAgentForSession(
             });
           }
           const se = mapAgentEventToServer(ev);
-          if (se) deps.sse.send(sessionId, se);
+          if (se) writer.write(se);
+          // If the client disconnected mid-stream, abort the loop
+          // so we don't keep doing expensive work.
+          if (writer.closed && !signal.aborted) {
+            runtime.controller.abort();
+          }
         },
       });
-    } finally {
-      // Persist any messages the loop appended to history (assistant
-      // text, tool_use blocks, tool_results, the terminal assistant
-      // message). On AbortError, completed iterations are still in
-      // history — only the in-flight partial is dropped, by design.
+    } catch (err) {
+      // Surface loop errors to the client (if still connected).
+      if (!writer.closed) {
+        const message = err instanceof Error ? err.message : String(err);
+        // Only emit a non-AbortError as `error`; aborts are normal.
+        if (!(err instanceof DOMException && err.name === "AbortError")) {
+          writer.write({ type: "error", message });
+        }
+      }
+      // Persist whatever messages the loop appended to history.
       const newMessages = history.slice(initialHistoryLength);
       for (const msg of newMessages) {
         await deps.store.appendMessage(sessionId, msg);
       }
+      throw err;
     }
+
+    // Persist whatever messages the loop appended to history
+    // (assistant text, tool_use, tool_results, terminal assistant).
+    const newMessages = history.slice(initialHistoryLength);
+    for (const msg of newMessages) {
+      await deps.store.appendMessage(sessionId, msg);
+    }
+
+    // T12.2 — Fire-and-forget LLM-generated title. Skipped when the
+    // session already has a title (manual rename, or
+    // createSession({ title })). Errors are logged + swallowed inside
+    // generateTitle so the route's return path is unaffected.
+    void generateTitle(
+      {
+        store: deps.store,
+        createProvider: deps.createProvider,
+        notify: (ev) => {
+          if (!writer.closed) writer.write(ev);
+        },
+      },
+      sessionId,
+    );
 
     return eventCount;
   } finally {
     deps.registry.finish(sessionId);
-    if (!options.autoApprove) {
-      deps.approvers.unregister(sessionId);
-    }
   }
 }
 
-function mapAgentEventToServer(
-  ev: import("@computerworks/agent").AgentEvent,
-): ServerEvent | null {
+function mapAgentEventToServer(ev: AgentEvent): ServerEvent | null {
   switch (ev.type) {
     case "token":
       return { type: "token", delta: ev.delta };
@@ -197,11 +217,14 @@ function mapAgentEventToServer(
         approved: ev.approved,
         ...(ev.reason ? { reason: ev.reason } : {}),
       };
-    case "turn_done":
-      return { type: "done" };
     case "error":
       return { type: "error", message: ev.message };
   }
+  // message_start / message_done / turn_done / done are loop-internal;
+  // we don't forward them as wire events. The response closes (with a
+  // single terminal `done` frame from SSEWriter.end) once the loop
+  // finishes.
+  return null;
 }
 
 export async function registerMessagesRoute(
@@ -221,13 +244,48 @@ export async function registerMessagesRoute(
       return reply.code(409).send({ error: "a turn is already in flight" });
     }
 
-    void runAgentForSession(deps, id, parsed.data.content, parsed.data.overrides, options)
-      .catch((err) => {
-        try {
-          deps.sse.send(id, { type: "error", message: (err as Error).message });
-        } catch { /* session may be gone */ }
-      });
+    // Build the SSE writer BEFORE we register the runtime, so a
+    // client disconnect during startup still flips `closed` and we
+    // don't leak an orphaned runtime.
+    const writer = createSSEWriter(reply);
+    const approver = new InteractiveApprover(writer, id, [], [], {
+      timeoutMs: 5 * 60_000,
+    });
+    const start = deps.registry.startIfIdle(id, approver);
+    if (start.busy) {
+      // Race: another request started a turn between our check
+      // and our register. Emit an error frame and bail.
+      writer.write({ type: "error", message: "a turn is already in flight" });
+      writer.end();
+      return;
+    }
 
-    return reply.code(204).send();
+    // Fire and forget: the response stream is the SSE channel; we
+    // don't await the agent here because we want the response to
+    // remain open while the agent streams.
+    void runAgentForSession(
+      deps,
+      id,
+      parsed.data.content,
+      writer,
+      start.runtime,
+      parsed.data.overrides,
+      options,
+    ).catch((err: unknown) => {
+      // Errors are already surfaced via the writer inside
+      // runAgentForSession; this catch is just defense-in-depth.
+      if (!writer.closed) {
+        const message = err instanceof Error ? err.message : String(err);
+        try {
+          writer.write({ type: "error", message });
+        } catch { /* ignore */ }
+      }
+    }).finally(() => {
+      if (!writer.closed) writer.end();
+    });
+
+    // The reply is hijacked by createSSEWriter; Fastify must not
+    // try to serialize a return value.
+    return reply;
   });
 }

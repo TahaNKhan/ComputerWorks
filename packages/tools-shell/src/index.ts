@@ -29,7 +29,10 @@ export const DEFAULT_MAX_OUTPUT_BYTES = 100 * 1024; // 100KB
 const TRUNCATION_MARKER = "\n…[truncated]…\n";
 
 export const runShellInputSchema = z.object({
-  command: z.string().min(1).describe("The shell command to execute"),
+  command: z.string().min(1).describe(
+    "REQUIRED. The shell command to execute. " +
+    "This argument MUST be included on every call — omitting it will fail validation."
+  ),
   cwd: z.string().optional().describe("Override the working directory"),
   timeoutMs: z
     .number()
@@ -91,10 +94,10 @@ function pickWindowsShell(): string {
  */
 function platformShell(): { shell: string; baseArgs: (cmd: string) => string[] } {
   if (process.platform === "win32") {
+    const shell = pickWindowsShell();
     return {
-      shell: pickWindowsShell(),
+      shell,
       baseArgs: (cmd) => {
-        const shell = pickWindowsShell();
         if (shell === "cmd.exe") {
           // cmd.exe: /c <cmd>, /d to skip AutoRun.
           return ["/d", "/c", cmd];

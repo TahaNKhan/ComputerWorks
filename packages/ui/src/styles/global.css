@@ -609,6 +609,29 @@ input, textarea {
   color: var(--error);
 }
 
+/* Validation error (T11.x): the model emitted a tool call with bad
+   args. Distinct from a runtime failure — typically a model bug, not
+   an environmental issue. Use a softer amber tone so it doesn't look
+   identical to a tool crash. */
+.cw-tool-badge-validation {
+  background: var(--warning-bg, #fff3cd);
+  color: var(--warning, #856404);
+}
+
+.cw-tool-call.validation-error {
+  border-color: var(--warning, #856404);
+}
+
+.cw-tool-section-error {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.cw-tool-section-error .cw-tool-pre {
+  color: var(--error);
+  white-space: pre-wrap;
+}
+
 .cw-tool-section {
   padding: 8px 10px;
   border-top: 1px solid var(--border);

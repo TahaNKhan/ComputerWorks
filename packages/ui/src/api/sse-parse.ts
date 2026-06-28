@@ -1,6 +1,10 @@
 // packages/ui/src/api/sse-parse.ts
-// Internal helpers used by `client.ts`'s SSEClient. Extracted so they
-// can be unit-tested without spinning up a server.
+// Internal helpers used by the store's `stream.ts` consumer. Extracted
+// so they can be unit-tested without spinning up a server.
+//
+// In v1.14 there's no long-lived `SSEClient` — each `POST /messages`
+// returns its own SSE response and `stream.ts` parses the bytes
+// through these primitives.
 
 import type { ServerEvent } from "./types.js";
 
@@ -90,6 +94,7 @@ function reconstructServerEvent(
     }
     case "tool_result": {
       const call_id = typeof body.call_id === "string" ? body.call_id : "";
+      const tool = typeof body.tool === "string" ? body.tool : "<unknown>";
       const approved = body.approved === true;
       const is_error = body.is_error === true;
       const result = "result" in body ? body.result : undefined;
@@ -97,6 +102,7 @@ function reconstructServerEvent(
       const out: Extract<ServerEvent, { type: "tool_result" }> = {
         type: "tool_result",
         call_id,
+        tool,
         approved,
         is_error,
         ...(result !== undefined ? { result } : {}),
@@ -118,6 +124,25 @@ function reconstructServerEvent(
         ...(diff !== undefined ? { diff } : {}),
       };
       return out;
+    }
+    case "tool_validation_error": {
+      const call_id = typeof body.call_id === "string" ? body.call_id : "";
+      const tool = typeof body.tool === "string" ? body.tool : "<unknown>";
+      const message = typeof body.message === "string" ? body.message : "";
+      if (!call_id || !message) return null;
+      const out: Extract<ServerEvent, { type: "tool_validation_error" }> = {
+        type: "tool_validation_error",
+        call_id,
+        tool,
+        message,
+      };
+      return out;
+    }
+    case "session_renamed": {
+      const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
+      const title = typeof body.title === "string" ? body.title : "";
+      if (!sessionId || !title) return null;
+      return { type: "session_renamed", sessionId, title };
     }
     case "error":
       if (typeof body.message === "string") return { type: "error", message: body.message };
