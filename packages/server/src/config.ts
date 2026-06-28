@@ -89,9 +89,30 @@ export const ConfigSchema = z.object({
         })
         .default({}),
       globalShellAllowlist: z.array(regexLiteral).default([]),
+      // Default denylist covers POSIX and Windows destructive commands.
+      // Users can override via their config.ts or by adding entries;
+      // the list is applied cross-platform so a user who configured
+      // for one OS still gets the other set as a safety net.
       shellDenylist: z
         .array(regexLiteral)
-        .default([/rm\s+-rf\s+\//, /format\s+c:/i, /mkfs/, /dd\s+if=/]),
+        .default([
+          // POSIX destructive
+          /rm\s+-rf\s+\//,
+          /format\s+c:/i,
+          /mkfs/,
+          /dd\s+if=/,
+          // Windows destructive (cmd.exe)
+          /rd\s+\/s\s+\/q/i,
+          /del\s+\/s\s+\/q/i,
+          /format\s+[a-z]:/i,
+          /diskpart/i,
+          /bcdedit/i,
+          // Windows destructive (PowerShell)
+          /Remove-Item\s+.*-Recurse\s+.*-Force/i,
+          /Format-Volume/i,
+          /Clear-Disk/i,
+          /reg\s+delete\s+HKEY/i,
+        ]),
     })
     .default({}),
   memory: z

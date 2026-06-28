@@ -18,7 +18,8 @@
 //   - The server layer (Phase 5) is responsible for any command
 //     denylist enforcement — this tool just runs what it's told.
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { z } from "zod";
 import type { ToolDefinition } from "@computerworks/core";
 
@@ -59,6 +60,33 @@ export interface RunShellOutput {
 }
 
 /**
+ * Pick a Windows shell from PATH. Preference order:
+ *   1. pwsh.exe (PowerShell Core — modern, cross-platform)
+ *   2. powershell.exe (Windows PowerShell 5.x — ships with Windows)
+ *   3. cmd.exe (always at COMSPEC)
+ *
+ * `where <exe>` is the Windows equivalent of `which`; status 0 means
+ * the binary was found on PATH. We cache the result so subsequent
+ * calls don't re-probe.
+ */
+let cachedWindowsShell: string | null = null;
+function pickWindowsShell(): string {
+  if (cachedWindowsShell !== null) return cachedWindowsShell;
+  for (const candidate of ["pwsh.exe", "powershell.exe"]) {
+    const probe = spawnSync("where", [candidate], { stdio: "ignore" });
+    if (probe.status === 0) {
+      cachedWindowsShell = candidate;
+      return candidate;
+    }
+  }
+  // cmd.exe is always available at COMSPEC on Windows; use it as the
+  // last-resort fallback so the tool never throws ENOENT on a clean
+  // install.
+  cachedWindowsShell = "cmd.exe";
+  return "cmd.exe";
+}
+
+/**
  * Pick the right shell + arg shape for the host platform.
  * `bash -lc <cmd>` runs in a login shell (PATH etc.); we use `-c` only
  * for the simple case where the caller passes a single command.
@@ -66,18 +94,37 @@ export interface RunShellOutput {
  */
 function platformShell(): { shell: string; baseArgs: (cmd: string) => string[] } {
   if (process.platform === "win32") {
-    // Prefer pwsh (PowerShell Core) if available; fall back to powershell.exe.
-    const shell =
-      process.env["COMSPEC"]?.includes("cmd") ? "powershell.exe" : "pwsh";
+    const shell = pickWindowsShell();
     return {
       shell,
-      baseArgs: (cmd) => ["-NoProfile", "-NonInteractive", "-Command", cmd],
+      baseArgs: (cmd) => {
+        if (shell === "cmd.exe") {
+          // cmd.exe: /c <cmd>, /d to skip AutoRun.
+          return ["/d", "/c", cmd];
+        }
+        // PowerShell: -NoProfile for fast startup, -NonInteractive
+        // so it never blocks on prompts, -Command <cmd>.
+        return ["-NoProfile", "-NonInteractive", "-Command", cmd];
+      },
     };
   }
+  // Unix: resolve `bash` via PATH. /bin/bash is the FHS path but macOS
+  // users with Homebrew and Git-Bash users on Windows-via-WSL have
+  // bash elsewhere — letting PATH decide is the portable choice.
   return {
-    shell: "/bin/bash",
+    shell: "bash",
     baseArgs: (cmd) => ["-lc", cmd],
   };
+}
+
+/** Cross-platform kill. On Windows we pass no signal so libuv uses
+ *  TerminateProcess directly; on Unix we pass SIGKILL. */
+function killChild(child: ChildProcess): void {
+  try {
+    child.kill(process.platform === "win32" ? undefined : "SIGKILL");
+  } catch {
+    /* already dead */
+  }
 }
 
 function maybeTruncate(buf: Buffer<ArrayBufferLike>, cap: number): { text: string; truncated: boolean } {
@@ -128,15 +175,14 @@ async function runOnce(
 
     const timer = setTimeout(() => {
       timedOut = true;
-      // SIGKILL on Unix; on Windows, child_process maps kill() to TerminateProcess.
-      try { child.kill("SIGKILL"); } catch { /* already dead */ }
+      killChild(child);
     }, timeoutMs);
 
     const onAbort = () => {
       // Abort counts as a timeout from the model's perspective — the
       // turn was cut short intentionally. Surface it the same way.
       timedOut = true;
-      try { child.kill("SIGKILL"); } catch { /* already dead */ }
+      killChild(child);
     };
     if (signal.aborted) onAbort();
     else signal.addEventListener("abort", onAbort, { once: true });

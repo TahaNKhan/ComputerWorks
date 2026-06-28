@@ -8,6 +8,27 @@
 
 import type { MemoryProvider } from "@computerworks/memory-files";
 
+/** Shell-safety guidance is platform-conditional so the LLM picks
+ *  commands that actually exist on the host shell (PowerShell on
+ *  Windows, bash on Unix). Both blocks are written to read identically
+ *  at a glance — the differences are only the command names. */
+function shellSafetyBlock(): string {
+  if (process.platform === "win32") {
+    return `## Shell safety (Windows / PowerShell)
+- We do not auto-quote shell input. Show the user exactly what you're
+  about to run.
+- Prefer non-destructive commands first (\`Get-ChildItem\`,
+  \`Get-Process\`, \`git status\`).
+- Don't pipe untrusted input through \`Invoke-Expression\` or
+  \`iex\`. Use \`Start-Process\` with explicit args instead.`;
+  }
+  return `## Shell safety (Unix / bash)
+- We do not auto-quote shell input. Show the user exactly what you're
+  about to run.
+- Prefer non-destructive commands first (\`ls\`, \`git status\`).
+- Don't pipe untrusted input through \`sh\` or \`eval\`.`;
+}
+
 const STATIC_PREFIX = `# ComputerWorks — session context
 
 You are ComputerWorks, a local PC-control assistant. The user is at the
@@ -25,11 +46,7 @@ terminal and approves every tool call that mutates state.
 - edit_file is atomic: ALL hunks must match before any write occurs.
   If one fails, the file is untouched.
 
-## Shell safety
-- We do not auto-quote shell input. Show the user exactly what you're
-  about to run.
-- Prefer non-destructive commands first (\`ls\`, \`git status\`).
-- Don't pipe untrusted input through \`sh\` or \`eval\`.
+${shellSafetyBlock()}
 
 ## Memory
 - You may call write_memory when you learn something likely useful in
