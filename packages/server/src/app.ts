@@ -116,10 +116,14 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
     app.get("/", async (_req, reply) => {
       return reply.sendFile("index.html");
     });
-    // Wildcard route for everything else; @fastify/static
-    // resolves the path against the configured root.
+    // Wildcard route for everything else; @fastify/static resolves
+    // the path against the configured root. We use req.url directly
+    // (stripped of the leading `/`) instead of the wildcard param
+    // because Fastify's typing for `/*` wildcard params isn't
+    // ergonomic without a generic at every handler site.
     app.get("/*", async (req, reply) => {
-      return reply.sendFile(req.params["*"] ?? "");
+      const assetPath = req.url.replace(/^\/+/, "");
+      return reply.sendFile(assetPath);
     });
   }
 

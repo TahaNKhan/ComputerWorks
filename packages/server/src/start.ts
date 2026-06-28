@@ -6,13 +6,24 @@
 // `--allow-non-loopback` flag (REQUIREMENTS.MD §6).
 //
 // T15.1 — `--ui-root=<path>` flag selects the built UI bundle
-// directory (default: `packages/ui/dist-app` relative to cwd).
-// Validated at startup; clear error if the path is missing.
+// directory. Default is `<workspace root>/packages/ui/dist-app`,
+// resolved relative to this file's location so it works regardless
+// of cwd (important when invoked via `bun run --filter
+// @computerworks/server start`). Validated at startup; clear error
+// if the path is missing.
 
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
 import { buildApp } from "./app.js";
+
+// src/start.ts → ../../../packages/ui/dist-app = <workspace>/packages/ui/dist-app
+// (also works when compiled: dist/start.js → ../../../packages/ui/dist-app)
+const DEFAULT_UI_ROOT = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "..", "..", "..", "packages", "ui", "dist-app",
+);
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -45,13 +56,14 @@ async function main() {
   }
 
   // T15.1 — Resolve the UI bundle directory. Default to the standard
-  // monorepo layout. Validate it exists; fail fast with a helpful
-  // error so users don't see a 500 on every page load after a
-  // `bun run start` without `bun run build`.
-  const uiRoot = resolve(explicitUiRoot ?? "packages/ui/dist-app");
+  // monorepo layout, computed relative to this file so the resolution
+  // is independent of cwd. Validate it exists; fail fast with a
+  // helpful error so users don't see a 500 on every page load after
+  // a `bun run start` without `bun run build`.
+  const uiRoot = resolve(explicitUiRoot ?? DEFAULT_UI_ROOT);
   if (!existsSync(uiRoot)) {
     console.error(`UI bundle directory not found: ${uiRoot}`);
-    console.error("Run `bun run build` first to produce the UI bundle, or pass --ui-root=<path>.");
+    console.error("Run \`bun run build\` first to produce the UI bundle, or pass --ui-root=<path>.");
     process.exit(2);
   }
 

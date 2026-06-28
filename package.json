@@ -6,9 +6,10 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "bun --env-file=.env run --filter @computerworks/server start:dev",
-    "build": "tsc -b tsconfig.build.json",
-    "build:clean": "rm -rf packages/*/dist && bun run build",
+    "dev": "bun run build && bun run start",
+    "dev:watch": "bun run --filter @computerworks/ui build -- --watch & bun --env-file=.env run --filter @computerworks/server start:dev",
+    "build": "tsc -b tsconfig.build.json && bun run --filter @computerworks/ui build",
+    "build:clean": "rm -rf packages/*/dist packages/ui/dist-app && bun run build",
     "test": "bun test",
     "test:e2e": "bun run scripts/e2e.ts",
     "typecheck": "tsc -b tsconfig.build.json",

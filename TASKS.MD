@@ -664,7 +664,7 @@ artifact.
       a working app without static serving
     - `bun run typecheck && bun test` is green
 
-- [ ] T15.2 — Build pipeline produces UI bundle #phase15 @ready target:phase15
+- [x] T15.2 — Build pipeline produces UI bundle #phase15 @ready target:phase15 _done:2026-06-28
   - **Files**: `packages/ui/package.json`,
     `packages/ui/vite.config.ts`,
     `package.json` (root)
