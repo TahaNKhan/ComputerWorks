@@ -30,6 +30,7 @@ export function App(): JSX.Element {
   const loadSessions = useSessionsStore((s) => s.loadSessions);
   const activeSessionId = useSessionsStore((s) => s.activeSessionId);
   const sessions = useSessionsStore((s) => s.sessions);
+  const initialized = useSessionsStore((s) => s.initialized);
   const status = useSessionsStore((s) => s.status);
   const cancelTurn = useSessionsStore((s) => s.cancelTurn);
   const switchSession = useSessionsStore((s) => s.switchSession);
@@ -51,7 +52,14 @@ export function App(): JSX.Element {
   // URL-driven session selection. On mount + after loadSessions:
   // if the URL has `?session=<id>`, switch to that session. If the
   // id doesn't exist, clear the URL and show a banner.
+  //
+  // T16.1 — gate on `initialized`. Without it, the effect fires
+  // once on mount with `sessions = []`, sees the URL id doesn't
+  // match anything, and immediately clears the URL before
+  // loadSessions() has a chance to populate the list. By the time
+  // the second pass runs (after sessions load), the URL is gone.
   useEffect(() => {
+    if (!initialized) return;
     const fromUrl = getSessionFromUrl();
     if (!fromUrl) {
       setSessionInUrl(activeSessionId);
@@ -68,7 +76,7 @@ export function App(): JSX.Element {
     // We intentionally exclude `activeSessionId` — it would cause
     // an infinite loop because switchSession updates it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessions, loadSessions, switchSession]);
+  }, [initialized, sessions, loadSessions, switchSession]);
 
   // Browser back/forward — popstate switches sessions.
   useEffect(() => {

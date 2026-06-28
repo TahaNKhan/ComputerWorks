@@ -706,6 +706,37 @@ artifact.
 
 ## Up next 👉
 
+### Phase 16 — UI bug fixes (URL sync + scroll-to-bottom)
+
+Two small UX bugs that surface when navigating to a session via the
+shareable URL:
+
+- [x] T16.1 — URL session sync lands on home page #phase16 @ready target:phase16 _done:2026-06-28
+  - **Files**: `packages/ui/src/App.tsx`,
+    `packages/ui/src/store/sessions.test.ts`
+  - **Deps**: none
+  - **Done when**:
+    - Visiting `/?session=<id>` for a real session id lands on that
+      session's chat (not the empty home state)
+    - The URL is only cleared if the session is genuinely not found
+      AFTER `loadSessions()` completes — not during the loading
+      window when `sessions` is still `[]`
+    - `bun run typecheck && bun test` is green
+
+- [x] T16.2 — Chat view scrolls to bottom on load #phase16 @ready target:phase16 _done:2026-06-28
+  - **Files**: `packages/ui/src/components/ChatView.tsx`,
+    `packages/ui/src/components/MessageList.tsx`
+  - **Deps**: none
+  - **Done when**:
+    - Opening a session with N messages shows the chat scrolled to
+      the last message (not the first)
+    - Switching between sessions with messages scrolls each to its
+      bottom
+    - The auto-scroll logic survives the `useDeferredValue` stagger
+      in `MessageList` — fix is to read scrollHeight after the
+      deferred render lands
+    - `bun run typecheck && bun test` is green
+
 After Phase 14 lands, the natural next moves are: cross-session tool
 calls (one session asking another to run a tool), persistent
 multi-tab sync (the new per-message SSE makes this trivially safe —
