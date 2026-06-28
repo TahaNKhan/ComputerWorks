@@ -356,6 +356,205 @@ describe("AnthropicProvider.inferText", () => {
   });
 });
 
+// ─── tool_use streaming ───────────────────────────────────────────────────
+// Anthropic streams a tool_use block across three event types:
+//   1. content_block_start  { content_block: { type: "tool_use",
+//                                              id, name, input: {} } }
+//   2. content_block_delta  { delta: { type: "input_json_delta",
+//                                       partial_json: "..." } }   (×N)
+//   3. content_block_stop   (no payload)
+// The provider must accumulate the partial JSON from (2) and emit a
+// single complete `tool_call` event at (3) — NOT at (1), when the
+// input is still empty. This block exercises that path end-to-end.
+
+describe("createAnthropicProvider — tool_use streaming", () => {
+  it("accumulates input from input_json_delta events and emits one complete tool_call on content_block_stop", async () => {
+    installFetchMock([
+      { event: "message_start", data: { type: "message_start", message: {
+        id: "msg_test", type: "message", role: "assistant",
+        content: [], model: "MiniMax-M3",
+        stop_reason: null, stop_sequence: null,
+        usage: { input_tokens: 0, output_tokens: 0 },
+      }}},
+      { event: "content_block_start", data: {
+        type: "content_block_start", index: 0,
+        content_block: { type: "tool_use", id: "toolu_a", name: "echo", input: {} },
+      }},
+      // The real input arrives as a series of partial-JSON deltas.
+      { event: "content_block_delta", data: {
+        type: "content_block_delta", index: 0,
+        delta: { type: "input_json_delta", partial_json: '{"msg":' },
+      }},
+      { event: "content_block_delta", data: {
+        type: "content_block_delta", index: 0,
+        delta: { type: "input_json_delta", partial_json: '"hello world"}' },
+      }},
+      { event: "content_block_stop", data: { type: "content_block_stop", index: 0 }},
+      { event: "message_stop", data: { type: "message_stop" }},
+    ]);
+
+    const { createAnthropicProvider } = await import("./anthropic.js");
+    const provider = createAnthropicProvider();
+
+    const events: import("../types.js").StreamEvent[] = [];
+    for await (const ev of provider.chat({
+      model: "",
+      messages: [{ role: "user", content: "echo please" }],
+      tools: [TOOL],
+    })) events.push(ev);
+
+    const toolCalls = events.filter((e) => e.type === "tool_call");
+    expect(toolCalls.length).toBe(1);
+    const call = (toolCalls[0] as Extract<typeof toolCalls[0], { type: "tool_call" }>).call;
+    expect(call.id).toBe("toolu_a");
+    expect(call.name).toBe("echo");
+    expect(call.input).toEqual({ msg: "hello world" });
+  });
+
+  it("handles multiple tool_use blocks in a single message", async () => {
+    installFetchMock([
+      { event: "message_start", data: { type: "message_start", message: {
+        id: "msg_test", type: "message", role: "assistant",
+        content: [], model: "MiniMax-M3",
+        stop_reason: null, stop_sequence: null,
+        usage: { input_tokens: 0, output_tokens: 0 },
+      }}},
+      // Block 0 — tool_use "echo"
+      { event: "content_block_start", data: {
+        type: "content_block_start", index: 0,
+        content_block: { type: "tool_use", id: "toolu_echo", name: "echo", input: {} },
+      }},
+      { event: "content_block_delta", data: {
+        type: "content_block_delta", index: 0,
+        delta: { type: "input_json_delta", partial_json: '{"msg":"first"}' },
+      }},
+      { event: "content_block_stop", data: { type: "content_block_stop", index: 0 }},
+      // Block 1 — tool_use "run_shell"
+      { event: "content_block_start", data: {
+        type: "content_block_start", index: 1,
+        content_block: { type: "tool_use", id: "toolu_shell", name: "run_shell", input: {} },
+      }},
+      { event: "content_block_delta", data: {
+        type: "content_block_delta", index: 1,
+        delta: { type: "input_json_delta", partial_json: '{"command":"ls -la /tmp"}' },
+      }},
+      { event: "content_block_stop", data: { type: "content_block_stop", index: 1 }},
+      { event: "message_stop", data: { type: "message_stop" }},
+    ]);
+
+    const { createAnthropicProvider } = await import("./anthropic.js");
+    const provider = createAnthropicProvider();
+
+    const events: import("../types.js").StreamEvent[] = [];
+    for await (const ev of provider.chat({
+      model: "",
+      messages: [{ role: "user", content: "do two things" }],
+      tools: [TOOL],
+    })) events.push(ev);
+
+    const toolCalls = events.filter((e) => e.type === "tool_call");
+    expect(toolCalls.length).toBe(2);
+    const a = (toolCalls[0] as Extract<typeof toolCalls[0], { type: "tool_call" }>).call;
+    const b = (toolCalls[1] as Extract<typeof toolCalls[1], { type: "tool_call" }>).call;
+    expect(a.name).toBe("echo");
+    expect(a.input).toEqual({ msg: "first" });
+    expect(b.name).toBe("run_shell");
+    expect(b.input).toEqual({ command: "ls -la /tmp" });
+  });
+
+  it("emits text tokens before the tool_call when a message has both text and tool_use", async () => {
+    installFetchMock([
+      { event: "message_start", data: { type: "message_start", message: {
+        id: "msg_test", type: "message", role: "assistant",
+        content: [], model: "MiniMax-M3",
+        stop_reason: null, stop_sequence: null,
+        usage: { input_tokens: 0, output_tokens: 0 },
+      }}},
+      // Block 0 — text
+      { event: "content_block_start", data: {
+        type: "content_block_start", index: 0,
+        content_block: { type: "text", text: "" },
+      }},
+      { event: "content_block_delta", data: {
+        type: "content_block_delta", index: 0,
+        delta: { type: "text_delta", text: "running now…" },
+      }},
+      { event: "content_block_stop", data: { type: "content_block_stop", index: 0 }},
+      // Block 1 — tool_use
+      { event: "content_block_start", data: {
+        type: "content_block_start", index: 1,
+        content_block: { type: "tool_use", id: "toolu_shell", name: "run_shell", input: {} },
+      }},
+      { event: "content_block_delta", data: {
+        type: "content_block_delta", index: 1,
+        delta: { type: "input_json_delta", partial_json: '{"command":"echo hi"}' },
+      }},
+      { event: "content_block_stop", data: { type: "content_block_stop", index: 1 }},
+      { event: "message_stop", data: { type: "message_stop" }},
+    ]);
+
+    const { createAnthropicProvider } = await import("./anthropic.js");
+    const provider = createAnthropicProvider();
+
+    const events: import("../types.js").StreamEvent[] = [];
+    for await (const ev of provider.chat({
+      model: "",
+      messages: [{ role: "user", content: "say hi then run something" }],
+      tools: [TOOL],
+    })) events.push(ev);
+
+    // Tokens come first, then the complete tool_call, then message_done.
+    const types = events.map((e) => e.type);
+    const tokenIdx = types.indexOf("token");
+    const callIdx = types.indexOf("tool_call");
+    const doneIdx = types.indexOf("message_done");
+    expect(tokenIdx).toBeGreaterThanOrEqual(0);
+    expect(callIdx).toBeGreaterThan(tokenIdx);
+    expect(doneIdx).toBeGreaterThan(callIdx);
+
+    const call = (events.find((e) => e.type === "tool_call") as Extract<typeof events[0], { type: "tool_call" }>).call;
+    expect(call.input).toEqual({ command: "echo hi" });
+  });
+
+  it("passes malformed input JSON through as a raw string so the registry's zod validation can report a useful error", async () => {
+    installFetchMock([
+      { event: "message_start", data: { type: "message_start", message: {
+        id: "msg_test", type: "message", role: "assistant",
+        content: [], model: "MiniMax-M3",
+        stop_reason: null, stop_sequence: null,
+        usage: { input_tokens: 0, output_tokens: 0 },
+      }}},
+      { event: "content_block_start", data: {
+        type: "content_block_start", index: 0,
+        content_block: { type: "tool_use", id: "toolu_bad", name: "echo", input: {} },
+      }},
+      { event: "content_block_delta", data: {
+        type: "content_block_delta", index: 0,
+        delta: { type: "input_json_delta", partial_json: "{not valid json" },
+      }},
+      { event: "content_block_stop", data: { type: "content_block_stop", index: 0 }},
+      { event: "message_stop", data: { type: "message_stop" }},
+    ]);
+
+    const { createAnthropicProvider } = await import("./anthropic.js");
+    const provider = createAnthropicProvider();
+
+    const events: import("../types.js").StreamEvent[] = [];
+    for await (const ev of provider.chat({
+      model: "",
+      messages: [{ role: "user", content: "broken" }],
+      tools: [TOOL],
+    })) events.push(ev);
+
+    const call = events.find((e) => e.type === "tool_call") as
+      Extract<typeof events[0], { type: "tool_call" }> | undefined;
+    expect(call).toBeDefined();
+    // Raw string is forwarded rather than dropped — the registry's
+    // zod validation will report a clear "invalid input" error.
+    expect(call?.call.input).toBe("{not valid json");
+  });
+});
+
 describe("getDefaultAnthropicProvider", () => {
   it("returns the same instance across calls (lazy singleton)", async () => {
     const { getDefaultAnthropicProvider, resetDefaultAnthropicProvider } =

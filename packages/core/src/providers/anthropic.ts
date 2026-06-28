@@ -187,25 +187,82 @@ export function zodToJsonSchema(schema: unknown): unknown {
 function translateEvent(
   raw: RawEvent,
   out: (e: StreamEvent) => void,
-  sink: { pendingUsage?: { input: number; output: number } },
+  sink: {
+    pendingUsage?: { input: number; output: number };
+    /**
+     * In-progress tool_use blocks, keyed by the Anthropic `index` of
+     * the content block. The Anthropic streaming protocol builds up a
+     * tool_use input incrementally:
+     *
+     *   content_block_start  { type: "tool_use", id, name, input: {} }
+     *   content_block_delta  { delta: { type: "input_json_delta",
+     *                                 partial_json: "{\"command\":" } }
+     *   content_block_delta  { delta: { type: "input_json_delta",
+     *                                 partial_json: "\"ls -la\"}" } }
+     *   content_block_stop   (no payload)
+     *
+     * We can't emit the tool_call event at `content_block_start` (the
+     * input is `{}` at that point) and we don't want to ship a stream
+     * of partial events. So we accumulate the JSON here and emit a
+     * single complete `tool_call` on `content_block_stop`.
+     */
+    inProgressToolUses?: Map<number, { id: string; name: string; inputJson: string }>;
+  },
 ): void {
   switch (raw.type) {
     case "message_start": out({ type: "message_start" }); return;
     case "content_block_start": {
-      const block = (raw.content_block ?? {}) as { type?: string; id?: string; name?: string; input?: unknown };
+      const block = (raw.content_block ?? {}) as { type?: string; id?: string; name?: string };
       if (block.type === "tool_use") {
-        out({ type: "tool_call", call: { type: "tool_use", id: block.id ?? "", name: block.name ?? "", input: block.input ?? {} } });
+        if (!sink.inProgressToolUses) sink.inProgressToolUses = new Map();
+        const index = typeof raw.index === "number" ? raw.index : 0;
+        sink.inProgressToolUses.set(index, {
+          id: block.id ?? "",
+          name: block.name ?? "",
+          inputJson: "",
+        });
       }
       return;
     }
     case "content_block_delta": {
-      const delta = (raw.delta ?? {}) as { type?: string; text?: string };
+      const delta = (raw.delta ?? {}) as { type?: string; text?: string; partial_json?: string };
       if (delta.type === "text_delta" && typeof delta.text === "string") {
         out({ type: "token", delta: delta.text });
+      } else if (delta.type === "input_json_delta" && typeof delta.partial_json === "string") {
+        const index = typeof raw.index === "number" ? raw.index : 0;
+        const inProgress = sink.inProgressToolUses?.get(index);
+        if (inProgress) inProgress.inputJson += delta.partial_json;
       }
       return;
     }
-    case "content_block_stop": return;
+    case "content_block_stop": {
+      const index = typeof raw.index === "number" ? raw.index : 0;
+      const inProgress = sink.inProgressToolUses?.get(index);
+      if (inProgress) {
+        let input: unknown = {};
+        if (inProgress.inputJson.length > 0) {
+          try {
+            input = JSON.parse(inProgress.inputJson);
+          } catch {
+            // Malformed input JSON — pass the raw string through so
+            // the registry's zod validation produces a useful error
+            // rather than dropping the call on the floor.
+            input = inProgress.inputJson;
+          }
+        }
+        out({
+          type: "tool_call",
+          call: {
+            type: "tool_use",
+            id: inProgress.id,
+            name: inProgress.name,
+            input,
+          },
+        });
+        sink.inProgressToolUses!.delete(index);
+      }
+      return;
+    }
     case "message_delta": {
       const usage = (raw.usage ?? {}) as { input_tokens?: number; output_tokens?: number };
       sink.pendingUsage = { input: usage.input_tokens ?? 0, output: usage.output_tokens ?? 0 };
@@ -315,7 +372,10 @@ export function createAnthropicProvider(
 
     const client = withScrubbedAnthropicEnv(() => new Anthropic({ ...clientOpts, fetch: globalThis.fetch } as never));
 
-    const sink: { pendingUsage?: { input: number; output: number } } = {};
+    const sink: {
+      pendingUsage?: { input: number; output: number };
+      inProgressToolUses?: Map<number, { id: string; name: string; inputJson: string }>;
+    } = { inProgressToolUses: new Map() };
 
     try {
       const stream = client.messages.stream(
