@@ -58,13 +58,14 @@ pushes. Do not bypass it.
 - ✅ Phase 11 — Persist LLM responses to transcript done on `phase/11-persist-responses`
 - ✅ Phase 12 — URL-routable sessions + LLM-generated titles done on `phase/auto`
   (T12.x tool_validation_error folded in from `phase/12-url-and-titles`)
-- ✅ Phase 14 — Per-message SSE + UI rewrite done on `phase/14-sse-and-ui`,
-  pushed to main per the user-issued override of the
-  "push only to phase branches" rule (CLAUDE.md §5). The architecture
-  shift is large: POST /messages opens its own SSE response, the
-  SSEManager is gone, the UI reducer is a pure function tested
-  without rendering any component. See TASKS.MD and the commit
+- ✅ Phase 14 — Per-message SSE + UI rewrite merged into main on 2026-06-28.
+  The architecture shift is large: POST /messages opens its own SSE
+  response, the SSEManager is gone, the UI reducer is a pure function
+  tested without rendering any component. See TASKS.MD and the commit
   history for the breakdown.
+- 🎉 Build complete — no further phases planned (Phase 14 was the
+  last architectural change; the codebase is now `main`-only, no
+  phase branches)
 
 ## CRITICAL: How to update TASKS.MD
 
@@ -113,25 +114,23 @@ the next session knows what's next.
 
 1. **Read** TASKS.MD (find `### Phase N`), CLAUDE.md, and one or two
    relevant existing source files to ground yourself.
-2. **Branch**: `git fetch origin phase/auto && git checkout -b phase/<N>-<slug> origin/phase/auto`
-   (Always branch off `phase/auto`, never off `main` directly — `phase/auto`
-   is the rolling integration branch.)
+2. **Work directly on `main`**: `git checkout main && git pull`.
+   No phase branches — tasks are individual commits on `main`. `main`
+   is the rolling integration branch (formerly `phase/auto`; folded in
+   after Phase 14).
 3. **Implement** task by task. After each task:
    - Run `bun run typecheck && bun test`.
    - If green: update TASKS.MD per the protocol above, then commit with
      `git add <files> && git commit -m "T<n>.<m>: <one-line summary>"`.
    - Multiple commits per phase are expected and welcome.
-4. **Final commit + push** for the phase:
-   - `git push -u origin phase/<N>-<slug>`
-   - Do NOT merge to main. The user merges manually.
-5. **Update CLAUDE.md**'s "Phase status" section.
+4. **Push** at natural pause points: `git push origin main`. The
+   pre-push hook runs `bun run typecheck` and refuses if red.
+5. **Update CLAUDE.md**'s "Phase status" section when the phase is done.
 
 ## Hard rules
 
-- Push only to your `phase/<N>-...` branch. **Never** push to `main`
-  directly. The user merges manually with `git merge --ff-only`.
-- The pre-push hook runs `bun run typecheck`. If it's red, you can't
-  push — fix the typecheck errors first.
+- Push to `main` directly. The pre-push hook runs `bun run typecheck`;
+  if red, you can't push — fix the typecheck errors first.
 - Don't commit `.hermes-state.json` (it's gitignored).
 - Don't bypass the pre-push hook with `--no-verify`.
 - Don't touch packages that aren't in your phase's TASKS.MD scope.
@@ -155,7 +154,7 @@ without making progress. Burn rate is the user's money.
 
 ## Don't
 
-- Push to `main` directly.
+- Create `phase/<N>-...` branches. Work goes on `main` directly.
 - Commit `.hermes-state.json`.
 - Add a tool that requires approval without a UI surface for it.
 - Skip `bun run typecheck && bun test` before committing.
