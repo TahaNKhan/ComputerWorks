@@ -163,6 +163,81 @@ describe("buildApp", () => {
   });
 });
 
+// ─── T15.1 — static UI serving ────────────────────────────────────────────
+// buildApp({ uiRoot }) registers @fastify/static + a GET / fallback.
+// Tests use a temp dir with a fixture index.html and assets/main.js.
+
+describe("static UI (T15.1)", () => {
+  let uiRoot: string;
+
+  beforeEach(() => {
+    uiRoot = mkdtempSync(join(tmpdir(), "cw-ui-"));
+    mkdirSync(join(uiRoot, "assets"));
+    Bun.write(join(uiRoot, "index.html"),
+      "<!doctype html><title>cw</title><script src=\"/assets/main.js\"></script>");
+    Bun.write(join(uiRoot, "assets", "main.js"),
+      "console.log('hello from fixture');");
+  });
+
+  afterEach(() => {
+    rmSync(uiRoot, { recursive: true, force: true });
+  });
+
+  it("GET / returns the index.html from uiRoot", async () => {
+    const app = await buildApp({
+      config: baseConfig,
+      store: new SessionStore({ root: sessionsRoot }),
+      uiRoot,
+    });
+    const res = await app.inject({ method: "GET", url: "/" });
+    expect(res.statusCode).toBe(200);
+    const ct = res.headers["content-type"];
+    expect(typeof ct === "string" && ct.includes("text/html")).toBe(true);
+    expect(res.body).toContain("<title>cw</title>");
+  });
+
+  it("GET /assets/main.js returns the bundle", async () => {
+    const app = await buildApp({
+      config: baseConfig,
+      store: new SessionStore({ root: sessionsRoot }),
+      uiRoot,
+    });
+    const res = await app.inject({ method: "GET", url: "/assets/main.js" });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain("hello from fixture");
+  });
+
+  it("GET /api/health still returns JSON (no path conflict)", async () => {
+    const app = await buildApp({
+      config: baseConfig,
+      store: new SessionStore({ root: sessionsRoot }),
+      uiRoot,
+    });
+    const res = await app.inject({ method: "GET", url: "/api/health" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: true });
+  });
+
+  it("without uiRoot, GET / returns 404 (UI is opt-in)", async () => {
+    const app = await buildApp({
+      config: baseConfig,
+      store: new SessionStore({ root: sessionsRoot }),
+    });
+    const res = await app.inject({ method: "GET", url: "/" });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("__cw test handle exposes the configured uiRoot", async () => {
+    const app = await buildApp({
+      config: baseConfig,
+      store: new SessionStore({ root: sessionsRoot }),
+      uiRoot,
+    });
+    const cw = (app as unknown as { __cw: { uiRoot: string | undefined } }).__cw;
+    expect(cw.uiRoot).toBe(uiRoot);
+  });
+});
+
 // ─── session routes ──────────────────────────────────────────────────────
 
 describe("session routes", () => {

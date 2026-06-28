@@ -29,6 +29,7 @@
     "@computerworks/tools-shell": "workspace:*",
     "@fastify/cors": "^10.0.0",
     "@fastify/sensible": "^6.0.0",
+    "@fastify/static": "^9.0.0",
     "fastify": "^5.0.0",
     "jiti": "^2.7.0",
     "zod": "^3.23.8"

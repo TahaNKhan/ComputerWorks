@@ -6,10 +6,17 @@
 // own SSEWriter and InteractiveApprover (per-request), and the
 // /approve + /cancel routes look up the in-flight runtime via
 // `SessionRegistry` instead of a global approver registry.
+//
+// T15.1 — When `uiRoot` is provided, registers `@fastify/static` to
+// serve the built UI bundle from that directory at `/`, plus a
+// single GET `/` fallback that returns `index.html`. The router
+// uses `?session=<id>` query strings (not paths), so a single
+// fallback is enough — no `/*` catch-all.
 
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import sensible from "@fastify/sensible";
+import staticPlugin from "@fastify/static";
 import { createAnthropicProvider } from "@computerworks/core";
 import type { Config } from "./config.js";
 import { SessionStore } from "./session-store.js";
@@ -20,7 +27,7 @@ import { registerMessagesRoute, type RunAgentDeps } from "./routes/messages.js";
 import { registerApproveRoute } from "./routes/approve.js";
 import { registerCancelRoute } from "./routes/cancel.js";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 export interface BuildAppOptions {
   config: Config;
@@ -33,6 +40,14 @@ export interface BuildAppOptions {
    * smoke test and headless runs.
    */
   autoApprove?: boolean;
+  /**
+   * Absolute path to the built UI bundle directory (typically
+   * `packages/ui/dist-app`). When set, `@fastify/static` serves the
+   * bundle at `/`, and a GET `/` fallback returns `index.html`.
+   * Omit for API-only deployments or tests that don't care about
+   * the UI.
+   */
+  uiRoot?: string;
 }
 
 export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> {
@@ -86,9 +101,31 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
   await registerApproveRoute(app, registry);
   await registerCancelRoute(app, registry);
 
+  // T15.1 — Serve the built UI bundle from the same origin as the
+  // API. `serve: false` makes @fastify/static NOT auto-register any
+  // routes; we wire them up explicitly so there's no conflict
+  // between @fastify/static's internal index handler and the
+  // GET / fallback below. All asset files (everything except
+  // index.html) live under /assets/ in the built bundle, served
+  // by the wildcard route; GET / returns index.html.
+  if (opts.uiRoot) {
+    await app.register(staticPlugin, {
+      root: resolve(opts.uiRoot),
+      serve: false,
+    });
+    app.get("/", async (_req, reply) => {
+      return reply.sendFile("index.html");
+    });
+    // Wildcard route for everything else; @fastify/static
+    // resolves the path against the configured root.
+    app.get("/*", async (req, reply) => {
+      return reply.sendFile(req.params["*"] ?? "");
+    });
+  }
+
   // Test handle — exposes internal pieces without leaking them on
   // the public route surface.
-  (app as unknown as { __cw: unknown }).__cw = { store, registry };
+  (app as unknown as { __cw: unknown }).__cw = { store, registry, uiRoot: opts.uiRoot };
 
   return app;
 }

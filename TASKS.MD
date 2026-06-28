@@ -634,6 +634,76 @@ derivation.
     - One final commit per task; final push to main per the
       user-issued override of the "push only to phase branches" rule
 
+### Phase 15 — Serve UI from server
+**Spec**: [phase-15-serve-ui-from-server](docs/specs/phase-15-serve-ui-from-server/)
+
+Today the dev workflow runs two processes: the Fastify server on
+`127.0.0.1:4747` and a Vite dev server on `localhost:5173` that
+proxies `/api/*`. This phase unifies them: the Fastify server
+serves the built UI bundle from `packages/ui/dist-app/` via
+`@fastify/static`. One process, one port, one URL. The user chose
+**build-then-serve** over Vite middleware mode — the cost is no
+HMR; the win is a cleaner dependency tree and one deployment
+artifact.
+
+- [x] T15.1 — Static-file serving in buildApp #phase15 @ready target:phase15 _done:2026-06-28
+  - **Files**: `packages/server/package.json`,
+    `packages/server/src/app.ts`,
+    `packages/server/src/start.ts`
+  - **Deps**: none
+  - **Done when**:
+    - `@fastify/static` added to `packages/server/package.json`
+    - `buildApp({ uiRoot })` registers `@fastify/static` and a
+      `GET /` fallback to `index.html` when `uiRoot` is provided
+    - `start.ts` accepts `--ui-root=<path>` (default
+      `packages/ui/dist-app` relative to cwd), validates the path
+      exists, fails fast with a clear error if not
+    - New tests in `app.test.ts` cover: `GET /` returns
+      `index.html`, `GET /assets/<file>` returns the bundle,
+      `GET /api/*` still returns JSON, missing `uiRoot` produces
+      a working app without static serving
+    - `bun run typecheck && bun test` is green
+
+- [ ] T15.2 — Build pipeline produces UI bundle #phase15 @ready target:phase15
+  - **Files**: `packages/ui/package.json`,
+    `packages/ui/vite.config.ts`,
+    `package.json` (root)
+  - **Deps**: T15.1
+  - **Done when**:
+    - `packages/ui/package.json` `build` is `tsc -b && vite build`,
+      emitting both `dist/` (TS) and `dist-app/` (Vite)
+    - `packages/ui/vite.config.ts` has no `server` block (no dev
+      server, no proxy); `emptyOutDir: true` on the build config
+    - `packages/ui/package.json` has no `dev` or `start` scripts
+    - Root `build` chains `tsc -b` and the UI build so a single
+      `bun run build` produces the full distributable
+    - Root `dev` is `bun run build && bun run start`
+    - Root `dev:watch` rebuilds the UI on change and restarts
+      the server in parallel
+    - `bun run build && bun run start` boots a working browser
+      session at `http://127.0.0.1:4747`
+
+- [ ] T15.3 — Docs + tests updated, ship #phase15 @ready target:phase15
+  - **Files**: `README.md`, `docs/architecture.md`,
+    `docs/specs/phase-07-ui/design.md`,
+    `docs/specs/phase-08-e2e-verification/ui-smoke.md`,
+    `packages/server/src/app.test.ts`,
+    `docs/specs/phase-15-serve-ui-from-server/{README,requirements,design}.md`
+  - **Deps**: T15.1, T15.2
+  - **Done when**:
+    - `app.test.ts` `localhost:5173` origin test updated to
+      `127.0.0.1:4747` (the new UI origin)
+    - `README.md` "Run" section describes one command, one port
+    - `architecture.md` runtime topology reflects single-port
+      serving
+    - `phase-07-ui/design.md` notes the dev-workflow change
+    - `ui-smoke.md`'s boot sequence is updated; the
+      second-terminal UI step is removed
+    - `phase-15` spec folder is complete with `README`,
+      `requirements`, `design` (Mermaid diagrams)
+    - `CLAUDE.md` "Phase status" reflects Phase 15 done
+    - `bun run typecheck && bun test` is green
+
 ## Up next 👉
 
 After Phase 14 lands, the natural next moves are: cross-session tool
