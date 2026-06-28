@@ -1,6 +1,10 @@
 // packages/ui/src/api/sse-parse.ts
-// Internal helpers used by `client.ts`'s SSEClient. Extracted so they
-// can be unit-tested without spinning up a server.
+// Internal helpers used by the store's `stream.ts` consumer. Extracted
+// so they can be unit-tested without spinning up a server.
+//
+// In v1.14 there's no long-lived `SSEClient` — each `POST /messages`
+// returns its own SSE response and `stream.ts` parses the bytes
+// through these primitives.
 
 import type { ServerEvent } from "./types.js";
 
@@ -134,11 +138,11 @@ function reconstructServerEvent(
       };
       return out;
     }
-    case "title_updated": {
+    case "session_renamed": {
       const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
       const title = typeof body.title === "string" ? body.title : "";
       if (!sessionId || !title) return null;
-      return { type: "title_updated", sessionId, title };
+      return { type: "session_renamed", sessionId, title };
     }
     case "error":
       if (typeof body.message === "string") return { type: "error", message: body.message };

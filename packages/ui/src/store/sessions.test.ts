@@ -1,5 +1,9 @@
 // packages/ui/src/store/sessions.test.ts
-// Unit tests for the pure reducer helpers in sessions.ts.
+//
+// T14.2 — Pure-helper tests for the reducer helpers. The reducer
+// itself is exercised in `./reducer.test.ts`; this file stays as a
+// thin sanity check on the helpers that compose the streaming
+// message model.
 
 import { describe, expect, test } from "bun:test";
 import {
@@ -9,7 +13,7 @@ import {
   applyToolResult,
   applyValidationError,
   finalizeStreaming,
-} from "./sessions.js";
+} from "./reducer.js";
 import type { ToolUseBlock, UiMessage } from "../api/types.js";
 
 function newStreamingMsg(text: string = ""): UiMessage {
@@ -63,9 +67,10 @@ describe("appendToolCall", () => {
 
 describe("applyToolResult", () => {
   test("fills in approved + result for matching call id", () => {
-    const msgs = [newStreamingMsg(""), { kind: "tool_call", call: SHELL_CALL } as never];
-    const m0 = msgs[0]!;
-    const m0WithTool: UiMessage = { ...m0, parts: [{ kind: "text", text: "" }, { kind: "tool_call", call: SHELL_CALL }] };
+    const m0WithTool: UiMessage = {
+      ...newStreamingMsg(""),
+      parts: [{ kind: "text", text: "" }, { kind: "tool_call", call: SHELL_CALL }],
+    };
     const updated = applyToolResult([m0WithTool], "call-1", {
       approved: true,
       isError: false,

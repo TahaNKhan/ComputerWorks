@@ -133,16 +133,16 @@ describe("parseSSEFrame", () => {
     });
   });
 
-  test("parses title_updated (T12.2)", () => {
+  test("parses session_renamed (T14.1)", () => {
     const body = JSON.stringify({ sessionId: "abc", title: "bun workspace setup" });
-    const ev = parseSSEFrame(`event: title_updated\ndata: ${body}`);
-    expect(ev).toEqual({ type: "title_updated", sessionId: "abc", title: "bun workspace setup" });
+    const ev = parseSSEFrame(`event: session_renamed\ndata: ${body}`);
+    expect(ev).toEqual({ type: "session_renamed", sessionId: "abc", title: "bun workspace setup" });
   });
 
-  test("returns null for title_updated with missing fields", () => {
-    expect(parseSSEFrame("event: title_updated\ndata: {}")).toBeNull();
+  test("returns null for session_renamed with missing fields", () => {
+    expect(parseSSEFrame("event: session_renamed\ndata: {}")).toBeNull();
     expect(
-      parseSSEFrame('event: title_updated\ndata: {"sessionId": "abc"}'),
+      parseSSEFrame('event: session_renamed\ndata: {"sessionId": "abc"}'),
     ).toBeNull();
   });
 

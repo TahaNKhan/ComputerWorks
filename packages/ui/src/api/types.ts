@@ -165,22 +165,28 @@ export type ServerEvent =
       reason?: string;
     }
   | {
-      /** Server emits this when the model called a tool with an input
-       *  shape that failed zod validation (typically the model forgot
-       *  a required field). The UI shows this as an inline error
-       *  attached to the tool_call block — distinct from a runtime
-       *  tool failure shown via `tool_result.is_error`. See T11.x. */
+      /** T12.x — Server emits this when the model called a tool with
+       *  an input shape that failed zod validation (typically the
+       *  model forgot a required field). The UI shows this as an
+       *  inline error attached to the tool_call block — distinct
+       *  from a runtime tool failure shown via `tool_result.is_error`.
+       *  Currently this event is only emitted in tests; the server
+       *  surfaces validation errors through `tool_result` with
+       *  `is_error: true` and `reason: <formatted message>`. We
+       *  keep the type here for parity with the codebase and for
+       *  future use. */
       type: "tool_validation_error";
       call_id: string;
       tool: string;
       message: string;
     }
   | {
-      /** T12.2 — The server has filled in / updated the session's
-       *  title. Triggered by the background LLM call after the first
-       *  turn (skipped if the user already named the session). The
-       *  UI reducer updates the matching session in the sidebar. */
-      type: "title_updated";
+      /** The server has updated the session's title. Triggered by
+       *  the background LLM call after the first turn (skipped if
+       *  the user already named the session), and by any manual
+       *  PATCH /api/sessions/:id. The reducer updates the matching
+       *  session in the sidebar. */
+      type: "session_renamed";
       sessionId: string;
       title: string;
     }
