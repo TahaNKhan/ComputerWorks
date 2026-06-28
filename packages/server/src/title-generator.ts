@@ -1,25 +1,20 @@
 // packages/server/src/title-generator.ts
-// T12.2 — Auto-generate a session title from the first user turn.
+// T12.2 + T14.1 — Auto-generate a session title from the first user turn.
 //
 // After a successful runTurn, the server fires a background call to
 // the provider with a short "summarize as a 3-5 word title" prompt.
-// The result is sanitized, PATCHed onto meta.title, and broadcast to
-// any open SSE clients as `title_updated`.
+// The result is sanitized, PATCHed onto meta.title, and emitted to
+// any open subscribers as `session_renamed`.
 //
-// Design choices:
-//   - Pure helpers (`sanitizeTitle`, `extractFirstExchange`) live
-//     here so they're unit-testable without a server.
-//   - `generateTitle(deps, sessionId)` does the I/O. It returns the
-//     sanitized title on success and `null` on any error / skip
-//     condition, and is fire-and-forget from the message route.
-//   - Skip conditions (already titled, no messages) are also returns
-//     of null; the caller doesn't need to distinguish — failures are
-//     logged inside the function so the route can stay dumb.
+// v1.14: instead of writing through an `SSEManager` (gone in T14.1),
+// the generator takes a `notify` callback. The messages route passes
+// a callback that writes to the per-request `SSEWriter`. If the turn
+// has already finished by the time the title lands, the callback can
+// no-op — the title is still persisted; only the live UI hint is lost.
 
 import type { Provider } from "@computerworks/core";
 import type { Message } from "@computerworks/core";
 import type { SessionStore } from "./session-store.js";
-import type { SSEManager } from "./sse.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────
 
@@ -120,12 +115,16 @@ function clip(s: string, max: number): string {
 
 export interface TitleGeneratorDeps {
   store: SessionStore;
-  sse: SSEManager;
   /** Provider factory — same shape as in `routes/messages.ts`. We use
    *  a fresh provider (not the run's) so the title prompt is
    *  independent of any per-request overrides and so a failure here
    *  can't poison the run's provider. */
   createProvider: () => Provider;
+  /** Called when a new title is generated. The messages route passes
+   *  a callback that writes a `session_renamed` frame to the in-flight
+   *  SSE response. If the request is already closed, the callback
+   *  can no-op — the title is still on disk. */
+  notify: (event: { type: "session_renamed"; sessionId: string; title: string }) => void;
 }
 
 /**
@@ -175,13 +174,10 @@ export async function generateTitle(
 
     // Race-y but acceptable: if the user renamed the session while we
     // were calling the LLM, the patch will overwrite their title. We
-    // re-check inside patchSession? No — the meta.title === "" check
-    // is the gate, and a concurrent rename means the user's choice
-    // wins because they hit the patch endpoint before ours lands.
-    // We accept that for a v1 title generator; the user can always
+    // accept that for a v1 title generator; the user can always
     // rename again.
     await deps.store.patch(sessionId, { title });
-    deps.sse.send(sessionId, { type: "title_updated", sessionId, title });
+    deps.notify({ type: "session_renamed", sessionId, title });
     return title;
   } catch (err) {
     // Log + swallow — the UX must not depend on a working title gen.

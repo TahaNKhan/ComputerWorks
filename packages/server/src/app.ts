@@ -1,5 +1,11 @@
 // packages/server/src/app.ts
-// T5.6 — Fastify app skeleton.
+// T14.1 — Fastify app skeleton, refactored for per-message SSE.
+//
+// Before v1.14 this file owned an SSEManager and an
+// ApproverRegistry; both are gone. The messages route now owns its
+// own SSEWriter and InteractiveApprover (per-request), and the
+// /approve + /cancel routes look up the in-flight runtime via
+// `SessionRegistry` instead of a global approver registry.
 
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
@@ -7,13 +13,10 @@ import sensible from "@fastify/sensible";
 import { createAnthropicProvider } from "@computerworks/core";
 import type { Config } from "./config.js";
 import { SessionStore } from "./session-store.js";
-import { SSEManager } from "./sse.js";
 import { SessionRegistry } from "./session-runtime.js";
-import { InteractiveApprover, ApproverRegistry } from "./interactive-approver.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerMessagesRoute, type RunAgentDeps } from "./routes/messages.js";
-import { registerStreamRoute } from "./routes/stream.js";
 import { registerApproveRoute } from "./routes/approve.js";
 import { registerCancelRoute } from "./routes/cancel.js";
 import { homedir } from "node:os";
@@ -22,9 +25,7 @@ import { join } from "node:path";
 export interface BuildAppOptions {
   config: Config;
   store?: SessionStore;
-  sse?: SSEManager;
   registry?: SessionRegistry;
-  approvers?: ApproverRegistry;
   createProvider?: RunAgentDeps["createProvider"];
   /**
    * If true, the messages route installs an AutoApprover (instead of an
@@ -59,18 +60,14 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
     root: opts.config.server?.sessionsRoot
       ?? join(homedir(), ".computerworks", "sessions"),
   });
-  const sse = opts.sse ?? new SSEManager({ heartbeatMs: 15_000 });
   const registry = opts.registry ?? new SessionRegistry();
-  const approvers = opts.approvers ?? new ApproverRegistry();
 
   await registerHealthRoutes(app);
   await registerSessionRoutes(app, store);
 
   const agentDeps: RunAgentDeps = {
     store,
-    sse,
     registry,
-    approvers,
     config: opts.config,
     createProvider: opts.createProvider ?? (() =>
       createAnthropicProvider({
@@ -86,11 +83,12 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
   };
 
   await registerMessagesRoute(app, agentDeps, { autoApprove: opts.autoApprove ?? false });
-  await registerStreamRoute(app, sse);
-  await registerApproveRoute(app, approvers);
+  await registerApproveRoute(app, registry);
   await registerCancelRoute(app, registry);
 
-  (app as unknown as { __cw: unknown }).__cw = { store, sse, registry, approvers };
+  // Test handle — exposes internal pieces without leaking them on
+  // the public route surface.
+  (app as unknown as { __cw: unknown }).__cw = { store, registry };
 
   return app;
 }

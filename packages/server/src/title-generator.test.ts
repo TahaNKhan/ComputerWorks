@@ -3,6 +3,9 @@
 // Unit tests for the pure helpers and end-to-end behavior of the
 // title generator. The provider is mocked with `createScriptedProvider`
 // so we never hit the network. The session store uses a temp dir.
+//
+// v1.14: the generator takes a `notify` callback instead of an
+// `SSEManager`. Tests capture notifications via a tiny array.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -17,7 +20,6 @@ import {
 } from "./title-generator.js";
 import type { Message } from "@computerworks/core";
 import { SessionStore } from "./session-store.js";
-import { SSEManager } from "./sse.js";
 
 describe("sanitizeTitle", () => {
   test("trims whitespace and collapses runs of spaces", () => {
@@ -55,7 +57,7 @@ describe("sanitizeTitle", () => {
   test("returns empty string for empty / whitespace input", () => {
     expect(sanitizeTitle("")).toBe("");
     expect(sanitizeTitle("   ")).toBe("");
-    expect(sanitizeTitle("\"")).toBe("");
+    expect(sanitizeTitle('"')).toBe("");
   });
 
   test("strips trailing punctuation", () => {
@@ -116,16 +118,15 @@ describe("extractFirstExchange", () => {
 describe("generateTitle", () => {
   let root: string;
   let store: SessionStore;
-  let sse: SSEManager;
+  let notified: { type: string; title?: string; sessionId?: string }[];
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), "cw-titlegen-"));
     store = new SessionStore({ root });
-    sse = new SSEManager({ heartbeatMs: 60_000 });
+    notified = [];
   });
 
   afterEach(async () => {
-    sse.shutdown();
     await rm(root, { recursive: true, force: true });
   });
 
@@ -135,23 +136,17 @@ describe("generateTitle", () => {
       model: "fake",
     });
     const id = (await store.list())[0]!.id;
-    const events: string[] = [];
-    sse.send = ((sid: string, ev: { type: string }) => {
-      events.push(`${sid}:${ev.type}`);
-      // @ts-expect-error - replace method on instance
-      return sse.send.call(sse, sid, ev);
-    }) as typeof sse.send;
     const out = await generateTitle(
       {
         store,
-        sse,
+        notify: (ev) => notified.push(ev),
         createProvider: () =>
           createScriptedProvider({ frames: [[{ type: "done" }]] }),
       },
       id,
     );
     expect(out).toBeNull();
-    expect(events).toEqual([]);
+    expect(notified).toEqual([]);
   });
 
   test("returns null (no-op) when the session already has a title", async () => {
@@ -161,19 +156,19 @@ describe("generateTitle", () => {
     const out = await generateTitle(
       {
         store,
-        sse,
+        notify: (ev) => notified.push(ev),
         createProvider: () =>
           createScriptedProvider({ frames: [[{ type: "token", delta: "should not run" }]] }),
       },
       id,
     );
     expect(out).toBeNull();
-    // Title is unchanged.
     const meta = await store.get(id);
     expect(meta?.title).toBe("Manual title");
+    expect(notified).toEqual([]);
   });
 
-  test("generates a title, patches meta, and emits title_updated over SSE", async () => {
+  test("generates a title, patches meta, and notifies via callback", async () => {
     await store.create({ cwd: "/tmp", model: "fake" });
     const id = (await store.list())[0]!.id;
     await store.appendMessage(id, {
@@ -185,24 +180,16 @@ describe("generateTitle", () => {
       content: "Run `bun init` and add packages to workspaces.",
     });
 
-    // Capture SSE events sent to this session.
-    const captured: { type: string; title?: string; sessionId?: string }[] = [];
-    const originalSend = sse.send.bind(sse);
-    sse.send = ((sid: string, ev: { type: string; title?: string; sessionId?: string }) => {
-      if (sid === id) captured.push(ev);
-      originalSend(sid, ev);
-    }) as typeof sse.send;
-
     const title = await generateTitle(
       {
         store,
-        sse,
+        notify: (ev) => notified.push(ev),
         createProvider: () =>
           createScriptedProvider({
             frames: [
               [
                 { type: "token", delta: '"bun ' },
-                { type: "token", delta: "workspace setup\"" },
+                { type: "token", delta: 'workspace setup"' },
                 { type: "done" },
               ],
             ],
@@ -213,8 +200,8 @@ describe("generateTitle", () => {
     expect(title).toBe("bun workspace setup");
     const meta = await store.get(id);
     expect(meta?.title).toBe("bun workspace setup");
-    expect(captured).toEqual([
-      { type: "title_updated", sessionId: id, title: "bun workspace setup" },
+    expect(notified).toEqual([
+      { type: "session_renamed", sessionId: id, title: "bun workspace setup" },
     ]);
   });
 
@@ -223,17 +210,10 @@ describe("generateTitle", () => {
     const id = (await store.list())[0]!.id;
     await store.appendMessage(id, { role: "user", content: "ping" });
 
-    const captured: unknown[] = [];
-    const originalSend = sse.send.bind(sse);
-    sse.send = ((sid: string, ev: unknown) => {
-      captured.push(ev);
-      originalSend(sid, ev as Parameters<typeof originalSend>[1]);
-    }) as typeof sse.send;
-
     const title = await generateTitle(
       {
         store,
-        sse,
+        notify: (ev) => notified.push(ev),
         createProvider: () =>
           createScriptedProvider({
             frames: [[{ type: "error", message: "kaboom" }]],
@@ -242,7 +222,7 @@ describe("generateTitle", () => {
       id,
     );
     expect(title).toBeNull();
-    expect(captured).toEqual([]);
+    expect(notified).toEqual([]);
     const meta = await store.get(id);
     expect(meta?.title).toBe("");
   });
@@ -255,7 +235,7 @@ describe("generateTitle", () => {
     const title = await generateTitle(
       {
         store,
-        sse,
+        notify: (ev) => notified.push(ev),
         createProvider: () =>
           createScriptedProvider({
             frames: [
