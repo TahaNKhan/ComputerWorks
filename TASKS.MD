@@ -11,6 +11,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
 ## Done ✅
 
 ### Phase 0 — Repo scaffolding 🔧 @ready
+**Spec**: [phase-00-scaffolding](docs/specs/phase-00-scaffolding/)
 
 - [x] T0.1 — Monorepo skeleton #phase0 @ready _done:2026-06-24
   - **Files**: `package.json`, `bunfig.toml`, `tsconfig.base.json`,
@@ -36,12 +37,13 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
     resolves the workspace links.
 
 ### Phase 1 — Core types and Provider interface 📦 @ready
+**Spec**: [phase-01-core-and-provider](docs/specs/phase-01-core-and-provider/)
 
 - [x] T1.1 — Core types #phase1 @ready _done:2026-06-25
   - **Files**: `packages/core/src/types.ts`,
     `packages/core/src/index.ts`
   - **Deps**: T0.2
-  - **Done when**: types in §4 of `DESIGN.MD` exist and compile.
+  - **Done when**: types in [phase-01-core-and-provider/design.md](docs/specs/phase-01-core-and-provider/design.md) exist and compile.
     Includes `Role`, content blocks, `Message`, `ToolDefinition`,
     `ToolContext`, `StreamEvent`. `bun run typecheck` passes for
     `core`.
@@ -49,7 +51,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
   - **Files**: `packages/core/src/provider.ts`
   - **Deps**: T1.1
   - **Done when**: `Provider` and `ProviderOverrides` interfaces
-    exist per §5 of `DESIGN.MD`. `core` typechecks.
+    exist per [phase-01-core-and-provider/design.md](docs/specs/phase-01-core-and-provider/design.md). `core` typechecks.
 - [x] T1.3 — Anthropic provider #phase1 @ready _done:2026-06-25
   - **Files**: `packages/core/src/providers/anthropic.ts`,
     `packages/core/src/providers/anthropic.test.ts`,
@@ -77,6 +79,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
     later test to avoid network calls.
 
 ### Phase 2 — Agent loop 🧠 @ready
+**Spec**: [phase-02-agent-loop](docs/specs/phase-02-agent-loop/)
 
 - [x] T2.1 — Approver interface and AutoApprover #phase2 @ready _done:2026-06-25
   - **Files**: `packages/agent/src/approval.ts`,
@@ -108,6 +111,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
       cap, cancellation, provider error, tool error
 
 ### Phase 3 — Tools 🛠️ @ready
+**Spec**: [phase-03-tools](docs/specs/phase-03-tools/)
 
 - [x] T3.1 — `run_shell` tool #phase3 @ready _done:2026-06-25
   - **Files**: `packages/tools-shell/src/index.ts`,
@@ -143,6 +147,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
     - All four tools are unit tested with a temp directory
 
 ### Phase 4 — Memory provider 🧠 @ready
+**Spec**: [phase-04-memory](docs/specs/phase-04-memory/)
 
 - [x] T4.1 — File-based memory provider #phase4 @ready _done:2026-06-25
   - **Files**: `packages/memory-files/src/index.ts`,
@@ -151,7 +156,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
   - **Done when**:
     - Implements `MemoryProvider` (`list`, `read`, `write`,
       `delete`, `search`)
-    - Storage layout matches §4.4 of `REQUIREMENTS.MD`:
+    - Storage layout matches [phase-04-memory/requirements.md](docs/specs/phase-04-memory/requirements.md):
       `<root>/notes/<name>.md` + `<root>/index.json`
     - `search` is case-insensitive substring + filename match,
       top-10, with ±60-char snippet around the match
@@ -163,6 +168,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
 ---
 
 ### Phase 5 — Server 🛰️
+**Spec**: [phase-05-server](docs/specs/phase-05-server/)
 
 - [x] T5.1 — Config loader #phase5 @ready target:phase5 _done:2026-06-25
   - **Files**: `packages/server/src/config.ts`,
@@ -171,7 +177,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
   - **Deps**: T1.1
   - **Done when**:
     - Loads `~/.computerworks/config.ts` via `jiti`
-    - Validates with the schema in §12 of `DESIGN.MD`
+    - Validates with the schema in [phase-05-server/design.md](docs/specs/phase-05-server/design.md#configuration)
     - Applies env overrides (`COMPUTERWORKS_*`)
     - Fails fast with a useful error on bad config
     - Unit tested with a temp config file and process env tweaks
@@ -182,7 +188,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
   - **Done when**:
     - `create`, `list`, `get`, `patch` (rename/cwd/model), `delete`,
       `appendMessage`, `appendAudit`
-    - Storage layout matches §4.4 of `REQUIREMENTS.MD`
+    - Storage layout matches [phase-05-server/requirements.md](docs/specs/phase-05-server/requirements.md)
     - Atomic per-line writes; concurrent appends are safe
     - Round-trip test passes for a session with several messages
       and audit entries
@@ -261,6 +267,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
 ---
 
 ### Phase 6 — CLI 💻
+**Spec**: [phase-06-cli](docs/specs/phase-06-cli/)
 
 - [x] T6.1 — `computerworks serve` #phase6 @ready target:phase6 _done:2026-06-25
   - **Files**: `packages/server/src/cli.ts`,
@@ -282,6 +289,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
 
 
 ### Phase 7 — UI 🖥️
+**Spec**: [phase-07-ui](docs/specs/phase-07-ui/)
 
 - [x] T7.1 — Vite + React scaffold #phase7 @ready target:phase7 _done:2026-06-25
   - **Files**: `packages/ui/`, `packages/ui/vite.config.ts`
@@ -351,6 +359,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
     work
 
 ### Phase 8 — End-to-end verification 🧪
+**Spec**: [phase-08-e2e-verification](docs/specs/phase-08-e2e-verification/)
 
 - [x] T8.1 — E2E smoke script #phase8 @ready target:phase8 _done:2026-06-25
   - **Files**: `scripts/e2e.ts`
@@ -375,6 +384,7 @@ and **depends on** as indented subtasks. Tags: `#phase<N>`, `@ready`,
  (run continuously)
 
 ### Phase 9 — MiniMax auth fix (LAN deployment followup)
+**Spec**: [phase-09-minimax-auth](docs/specs/phase-09-minimax-auth/)
 
 LAN device got `401 Invalid bearer token` from MiniMax because three config defaults pointed at real Anthropic. Root-caused and fixed on `phase/9-minimax-auth`.
 
@@ -382,6 +392,7 @@ LAN device got `401 Invalid bearer token` from MiniMax because three config defa
       _done:2026-06-25 — commit `041c0aa` on `phase/9-minimax-auth`
 
 ### Phase 10 — Mobile-friendly UI (LAN deployment followup)
+**Spec**: [phase-10-mobile-ui](docs/specs/phase-10-mobile-ui/)
 
 User opened the UI on a phone and the three-pane layout was unusable. Pure CSS + component pass — no new deps, no state restructure.
 
@@ -389,6 +400,7 @@ User opened the UI on a phone and the three-pane layout was unusable. Pure CSS +
       Mobile-first CSS: <768px single pane (chat only) with sidebar as a slide-in drawer behind a hamburger; >=768px inline sidebar + chat (2 panes); >=1024px full 3-pane layout. Sticky composer with safe-area-inset padding, 44px tap targets, 16px base font (no iOS zoom-on-focus), ApprovalCard buttons stacked vertically on mobile.
 
 ### Phase 11 — Persist LLM responses to transcript
+**Spec**: [phase-11-persist-responses](docs/specs/phase-11-persist-responses/)
 
 User noticed the session transcript (messages.jsonl) only contains the user message — assistant text, tool calls, and tool results stayed in the agent loop's in-memory `history` and were lost on reload. SSE consumers saw them in the stream, but `GET /api/sessions/:id` returned just the user turn.
 
@@ -415,6 +427,7 @@ User noticed the session transcript (messages.jsonl) only contains the user mess
       fix, passes after
 
 ### Phase 12 — URL-routable sessions + LLM-generated titles
+**Spec**: [phase-12-url-and-titles](docs/specs/phase-12-url-and-titles/)
 
 Two UX asks that go together: the sidebar's session id should be
 shareable via URL, and the session title should auto-generate
@@ -478,9 +491,10 @@ non-empty (so manual renames + titled-on-create survive).
   and `eslint-plugin-react` for the UI package.
 - [x] Dependency hygiene #gates @ready _done:2026-06-28 — `bun outdated` reviewed
   before each phase close; no `bun add` of a package with a
-  non-MIT/Apache/BSD license without a note in `REQUIREMENTS.MD`.
+  non-MIT/Apache/BSD license without a note in the phase's `requirements.md`.
 
 ### Phase 14 — Per-message SSE + UI rewrite
+**Spec**: [phase-14-per-message-sse](docs/specs/phase-14-per-message-sse/)
 
 The Phase 5/7 architecture held two long-lived SSE channels open per
 session — one per browser tab — and made the agent loop a background

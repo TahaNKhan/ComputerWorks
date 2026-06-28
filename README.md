@@ -131,7 +131,9 @@ export default {
 
 Any key you omit falls back to the schema default. See
 [`packages/server/src/config.ts`](packages/server/src/config.ts) for the
-full schema and `DESIGN.MD §12` for the design rationale.
+full schema and
+[`docs/specs/phase-05-server/design.md`](docs/specs/phase-05-server/design.md#configuration)
+for the design rationale.
 
 ### Override the API base URL
 
@@ -250,49 +252,11 @@ ComputerWorks on a different port: `bun run start -- --port 4748`.
 
 ## Architecture
 
-The repo is a Bun workspace; every package is independently
-typecheckable and publishable. Roughly:
-
-```
-packages/
-  core/           # types, Provider interface, ScriptedProvider (test double)
-  agent/          # runTurn state machine, Approver, ToolRegistry
-  tools-shell/    # run_shell tool
-  tools-files/    # read_file, write_file, edit_file, list_dir
-  memory-files/   # FileMemoryProvider (notes under ~/.computerworks/memory/notes/)
-  server/         # Fastify app, REST routes, per-message SSE, session store, CLI
-  cli/            # computerworks serve / sessions / memory commands
-  ui/             # React + Vite SPA
-scripts/
-  e2e.ts          # end-to-end smoke runner (excluded from bun test)
-docs/
-  ui-smoke.md     # human-driven UI checklist
-```
-
-**Request flow (Phase 14 — per-message SSE):**
-
-1. UI `POST`s a user message to `/api/sessions/:id/messages`. The
-   response is `Content-Type: text/event-stream`; the response body
-   *is* the SSE channel for that turn.
-2. The server streams events directly into the response as the agent
-   runs: `message_start`, `token`, `tool_call`, `approval_required`,
-   `tool_result`, `session_renamed`, `message_done`, and a terminal
-   `done` frame. The response closes when the turn ends.
-3. Multiple tabs on the same session are isolated by request
-   lifecycle — each tab holds its own response stream, and there's
-   no shared broadcast queue.
-4. For each tool call the agent asks the **Approver**
-   (`InteractiveApprover` by default, `AutoApprover` for the E2E
-   smoke test). The Interactive approver writes the
-   `approval_required` event through the same per-response writer
-   and holds its `(requestId → resolver)` map locally; the
-   `/approve` route resolves the right request via the
-   `SessionRegistry`.
-5. Each turn's transcript is appended to `messages.jsonl`; each
-   tool-call decision is appended to `audit.jsonl`.
-
-See `DESIGN.MD` for the long-form spec and `REQUIREMENTS.MD` for
-product requirements.
+See [`docs/architecture.md`](docs/architecture.md) for the system
+overview, runtime topology, wire protocol, monorepo layout, and
+package dependency graph. Per-phase design notes live in
+[`docs/specs/`](docs/specs/) — one folder per phase, each with its
+own `requirements.md` and `design.md`.
 
 ---
 

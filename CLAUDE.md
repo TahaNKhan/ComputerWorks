@@ -50,6 +50,28 @@ pushes. Do not bypass it.
 - All file tools run under `cwd` and reject paths that escape it
 - Shell + write_file + edit_file + write_memory require approval
 
+## Documentation
+
+Docs are split per phase, not monolithic. The layout:
+
+- `docs/architecture.md` — the one constant: 1-page system overview
+  (runtime topology, wire protocol, monorepo layout, package
+  dependencies). Start here when orienting.
+- `docs/specs/phase-NN-<name>/` — one folder per phase. Each has a
+  `README.md` (status, isolation, pointers, why-isolated),
+  `requirements.md` (what + why), and `design.md` (how).
+- `TASKS.MD` (this repo root) — the active task ledger. **Use this
+  filename** — the project's update protocol below references it
+  explicitly. Each `### Phase N` heading carries a `**Spec**:`
+  pointer to the corresponding spec folder.
+- `README.md` — the user-facing manual (install / run / configure /
+  troubleshoot). Slim by design; points at `docs/architecture.md`
+  for the system overview.
+- `docs/specs/phase-08-e2e-verification/ui-smoke.md` — the
+  human-driven UI smoke checklist.
+
+ASCII box-drawing in diagrams is forbidden; use Mermaid.
+
 ## Phase status (check TASKS.MD for details)
 
 - ✅ Phases 0–8 done and pushed to main
