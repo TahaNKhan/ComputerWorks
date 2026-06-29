@@ -63,26 +63,30 @@ export function App(): JSX.Element {
   // tabId (used to dedupe our own `message_appended` echoes) and
   // forwards central-SSE events to the reducer. Resync signals
   // refresh the active session + sessions list — covers events
-  // missed during SSE flap recovery.
+  // missed during SSE flap recovery. Lifecycle logs are dev-only;
+  // SharedWorker init failures stay loud in production.
+  const appDevLog = (...args: unknown[]): void => {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log("[App]", ...args);
+    }
+  };
   useEffect(() => {
     let unsubEvent: (() => void) | null = null;
     let unsubResync: (() => void) | null = null;
     try {
       const conn = connectSyncWorker();
       void conn.tabId.then((id) => {
-        // eslint-disable-next-line no-console
-        console.log("[App] initSync assigned tabId:", id);
+        appDevLog("initSync assigned tabId:", id);
         setTabId(id);
       });
       unsubEvent = conn.onEvent((ev) => {
         const sid = eventSessionId(ev, activeSessionId);
-        // eslint-disable-next-line no-console
-        console.log("[App] applyServerEvent:", ev.type, "sessionId:", sid);
+        appDevLog("applyServerEvent:", ev.type, "sessionId:", sid);
         if (sid) applyServerEvent(sid, ev);
       });
       unsubResync = conn.onResync(() => {
-        // eslint-disable-next-line no-console
-        console.log("[App] resync received — refreshing state");
+        appDevLog("resync received — refreshing state");
         if (activeSessionId) void loadTranscript(activeSessionId);
         void loadSessions();
       });

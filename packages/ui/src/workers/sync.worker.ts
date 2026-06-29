@@ -41,6 +41,19 @@ let attempt = 0;
 const workerSelf = self as unknown as SharedWorkerGlobalScope;
 
 const TAG = "[sync.worker]";
+// devLog: lifecycle / debug info. Stays in dev only.
+// warnLog: real anomalies (parse failures, SSE errors) — keep in
+// production so they're observable if something goes wrong.
+const devLog = (...args: unknown[]): void => {
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log(TAG, ...args);
+  }
+};
+const warnLog = (...args: unknown[]): void => {
+  // eslint-disable-next-line no-console
+  console.warn(TAG, ...args);
+};
 
 workerSelf.addEventListener(
   "connect",
@@ -49,16 +62,14 @@ workerSelf.addEventListener(
     if (!port) return;
     const tabId = crypto.randomUUID();
     ports.set(port, tabId);
-    // eslint-disable-next-line no-console
-    console.log(TAG, "tab connected, assigned tabId:", tabId, "total tabs:", ports.size);
+    devLog("tab connected, assigned tabId:", tabId, "total tabs:", ports.size);
     port.postMessage({ kind: "registered", tabId } satisfies WorkerToTab);
     port.start();
 
     port.addEventListener("message", (mev: MessageEvent) => {
       const data = mev.data as TabToWorker | undefined;
       if (!data) return;
-      // eslint-disable-next-line no-console
-      console.log(TAG, "received message from tab", tabId, ":", data);
+      devLog("received message from tab", tabId, ":", data);
       // No write actions from tabs in V1.
       void data;
     });
@@ -70,8 +81,7 @@ workerSelf.addEventListener(
 async function startSSEIfNeeded(): Promise<void> {
   if (sseController) return;
   sseController = new AbortController();
-  // eslint-disable-next-line no-console
-  console.log(TAG, "starting central SSE fetch /api/sync");
+  devLog("starting central SSE fetch /api/sync");
   await connectAndLoop(sseController.signal);
 }
 
@@ -90,8 +100,7 @@ async function connectAndLoop(signal: AbortSignal): Promise<void> {
         throw new Error(`SSE connect failed: HTTP ${res.status}`);
       }
       attempt = 0; // reset on clean connect
-      // eslint-disable-next-line no-console
-      console.log(TAG, "central SSE connected (status", res.status + ")");
+      devLog("central SSE connected (status", res.status + ")");
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder("utf-8");
@@ -99,8 +108,7 @@ async function connectAndLoop(signal: AbortSignal): Promise<void> {
       while (!signal.aborted) {
         const { value, done } = await reader.read();
         if (done) {
-          // eslint-disable-next-line no-console
-          console.log(TAG, "central SSE stream ended cleanly");
+          devLog("central SSE stream ended cleanly");
           break;
         }
         buffer += decoder.decode(value, { stream: true });
@@ -109,19 +117,16 @@ async function connectAndLoop(signal: AbortSignal): Promise<void> {
         for (const frame of frames.events) {
           const ev = parseSSEFrame(frame);
           if (ev) {
-            // eslint-disable-next-line no-console
-            console.log(TAG, "parsed event from server:", ev.type, ev);
+            devLog("parsed event from server:", ev.type, ev);
             broadcast({ kind: "event", event: ev } satisfies WorkerToTab);
           } else {
-            // eslint-disable-next-line no-console
-            console.warn(TAG, "failed to parse SSE frame:", JSON.stringify(frame));
+            warnLog("failed to parse SSE frame:", JSON.stringify(frame));
           }
         }
       }
     } catch (err) {
       if (signal.aborted) break;
-      // eslint-disable-next-line no-console
-      console.warn(TAG, "SSE error, reconnecting:", err);
+      warnLog("SSE error, reconnecting:", err);
     }
 
     if (signal.aborted) break;
@@ -134,8 +139,7 @@ async function connectAndLoop(signal: AbortSignal): Promise<void> {
 }
 
 function broadcast(msg: WorkerToTab): void {
-  // eslint-disable-next-line no-console
-  console.log(TAG, "broadcasting to", ports.size, "tabs:", msg);
+  devLog("broadcasting to", ports.size, "tabs:", msg);
   for (const port of ports.keys()) {
     try {
       port.postMessage(msg);

@@ -54,10 +54,16 @@ function openTransport(): { port: MessagePort } {
 export function connectSyncWorker(): SyncConnection {
   const { port } = openTransport();
   // T17 debug — surface lifecycle at the tab. Tag every line with a
-  // stable prefix so a single grep on the console shows the whole flow.
+  // stable prefix so a single grep on the console shows the whole
+  // flow. Gated on import.meta.env.DEV so production strips these.
   const TAG = "[sync-client]";
-  // eslint-disable-next-line no-console
-  console.log(TAG, "connecting to SharedWorker (sw.port opened)");
+  const devLog = (...args: unknown[]): void => {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log(TAG, ...args);
+    }
+  };
+  devLog("connecting to SharedWorker (sw.port opened)");
 
   const eventListeners = new Set<(ev: ServerEvent) => void>();
   const resyncListeners = new Set<() => void>();
@@ -75,18 +81,15 @@ export function connectSyncWorker(): SyncConnection {
     const msg = ev.data as WorkerToTab | undefined;
     if (!msg) return;
     if (msg.kind === "registered") {
-      // eslint-disable-next-line no-console
-      console.log(TAG, "received registered tabId from worker:", msg.tabId);
+      devLog("received registered tabId from worker:", msg.tabId);
       resolveTabId?.(msg.tabId);
     } else if (msg.kind === "event") {
-      // eslint-disable-next-line no-console
-      console.log(TAG, "received event from worker:", msg.event.type, msg.event);
+      devLog("received event from worker:", msg.event.type, msg.event);
       for (const cb of eventListeners) {
         try { cb(msg.event); } catch { /* ignore listener errors */ }
       }
     } else if (msg.kind === "resync") {
-      // eslint-disable-next-line no-console
-      console.log(TAG, "received resync from worker");
+      devLog("received resync from worker");
       // Debounce: the worker may emit a burst of resync signals
       // during SSE flap recovery. Coalesce into a single listener
       // call after a short quiet period.
@@ -104,8 +107,7 @@ export function connectSyncWorker(): SyncConnection {
   // sends `{ kind: 'registered', tabId }` back via the same port.
   // We don't need a separate MessageChannel — `sw.port` is the
   // single bidirectional channel.
-  // eslint-disable-next-line no-console
-  console.log(TAG, "posting subscribe to worker");
+  devLog("posting subscribe to worker");
   port.postMessage({ kind: "subscribe" } satisfies TabToWorker);
 
   return {
