@@ -15,9 +15,22 @@
 
 import type { ToolUseBlock } from "@computerworks/core";
 
+// T17.2 — Wire shape for a persisted message. Mirrors the agent
+// loop's `Message` shape so the UI can re-render from `messages.jsonl`
+// without conversion. The role union includes "system" (the agent
+// loop writes one into history at runtime).
+export interface ServerMessage {
+  role: "user" | "assistant" | "tool" | "system";
+  content: unknown;
+}
+
 /** Wire event types sent from server → client over SSE. The set of
  *  events is unchanged from Phase 5; only the transport is new
- *  (per-message SSE instead of a persistent GET /stream). */
+ *  (per-message SSE instead of a persistent GET /stream).
+ *
+ *  T17.2 — adds `message_appended` for cross-tab sync. That event
+ *  is central-SSE-only (not per-message SSE); the per-message SSE
+ *  keeps streaming live per-turn events to the leader. */
 export type ServerEvent =
   | { type: "message_start" }
   | { type: "token"; delta: string }
@@ -40,7 +53,18 @@ export type ServerEvent =
   | { type: "message_done"; usage: { input: number; output: number } }
   | { type: "session_renamed"; sessionId: string; title: string }
   | { type: "error"; message: string }
-  | { type: "done" };
+  | { type: "done" }
+  | {
+      // T17.2 — central SSE only. Emitted after every successful
+      // appendMessage (user + assistant). Carries the originator
+      // tab UUID so the originating tab can dedupe its own optimistic
+      // append; idempotent on `id` for re-connect safety.
+      type: "message_appended";
+      sessionId: string;
+      message: ServerMessage;
+      originator: string;
+      ts: string;
+    };
 
 // ─── Framing ──────────────────────────────────────────────────────────────
 

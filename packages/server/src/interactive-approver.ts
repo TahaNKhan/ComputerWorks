@@ -12,6 +12,12 @@
 // `(requestId → resolver)` map is owned by the approver instance,
 // which lives for exactly one turn; the messages route stores the
 // approver on the `SessionRuntime` so the /approve route can find it.
+//
+// T17.2 — `approval_required` and `tool_result` move off the
+// per-request `SSEWriter` and onto the central SSE (via `SyncHub`).
+// The leader sees them on the central SSE — same end result, no
+// duplication — and the leader's per-message SSE is reserved for
+// live per-turn events only.
 
 import { randomUUID } from "node:crypto";
 import type {
@@ -19,7 +25,7 @@ import type {
   ApprovalDecision,
   ApprovalRequest,
 } from "@computerworks/agent";
-import type { SSEWriter } from "./sse-writer.js";
+import type { SyncHub } from "./sync-hub.js";
 import type { ServerEvent } from "./sse.js";
 
 export interface InteractiveApproverOptions {
@@ -29,7 +35,7 @@ export interface InteractiveApproverOptions {
 
 export class InteractiveApprover implements Approver {
   public readonly sessionId: string;
-  private readonly writer: SSEWriter;
+  private readonly syncHub: SyncHub;
   private readonly sessionAllowlist: readonly string[];
   private readonly globalShellAllowlist: readonly RegExp[];
   private readonly timeoutMs: number;
@@ -38,13 +44,13 @@ export class InteractiveApprover implements Approver {
   private readonly pending = new Map<string, (d: ApprovalDecision) => void>();
 
   constructor(
-    writer: SSEWriter,
+    syncHub: SyncHub,
     sessionId: string,
     sessionAllowlist: readonly string[],
     globalShellAllowlist: readonly RegExp[],
     opts: InteractiveApproverOptions = {},
   ) {
-    this.writer = writer;
+    this.syncHub = syncHub;
     this.sessionId = sessionId;
     this.sessionAllowlist = sessionAllowlist;
     this.globalShellAllowlist = globalShellAllowlist;
@@ -56,9 +62,13 @@ export class InteractiveApprover implements Approver {
     req: ApprovalRequest,
     signal: AbortSignal,
   ): Promise<ApprovalDecision> {
+    const broadcast = (ev: ServerEvent): void => {
+      this.syncHub.broadcast(ev);
+    };
+
     // 1. Check global shell allowlist (still logged via tool_result).
     if (req.call.name === "run_shell" && this.matchesGlobalShell(req.call.input)) {
-      this.writer.write({
+      broadcast({
         type: "tool_result",
         call_id: req.call.id,
         approved: true,
@@ -70,7 +80,7 @@ export class InteractiveApprover implements Approver {
 
     // 2. Check session allowlist.
     if (this.matchesSessionAllowlist(req.call)) {
-      this.writer.write({
+      broadcast({
         type: "tool_result",
         call_id: req.call.id,
         approved: true,
@@ -80,7 +90,7 @@ export class InteractiveApprover implements Approver {
       return { kind: "approve_once" };
     }
 
-    // 3. Otherwise, prompt the user via the per-response SSE stream.
+    // 3. Otherwise, prompt the user via the central SSE.
     const requestId = randomUUID();
     return new Promise<ApprovalDecision>((resolve) => {
       // Timeout handler.
@@ -100,7 +110,7 @@ export class InteractiveApprover implements Approver {
         timer = setTimeout(() => {
           signal.removeEventListener("abort", onAbort);
           this.pending.delete(requestId);
-          this.writer.write({
+          broadcast({
             type: "tool_result",
             call_id: req.call.id,
             approved: false,
@@ -116,8 +126,8 @@ export class InteractiveApprover implements Approver {
         if (timer) clearTimeout(timer);
         signal.removeEventListener("abort", onAbort);
         this.pending.delete(requestId);
-        // Emit a tool_result so the client UI can show the decision.
-        this.writer.write({
+        // Emit a tool_result so client UIs can show the decision.
+        broadcast({
           type: "tool_result",
           call_id: req.call.id,
           approved: decision.kind !== "reject",
@@ -135,7 +145,7 @@ export class InteractiveApprover implements Approver {
         description: req.description,
         ...(req.diff !== undefined ? { diff: req.diff } : {}),
       };
-      this.writer.write(approvalEvent);
+      broadcast(approvalEvent);
     });
   }
 

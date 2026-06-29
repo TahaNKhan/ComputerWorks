@@ -762,7 +762,7 @@ makes each tab's POST /messages isolated on the wire — the
 remaining work is in the UI store (BroadcastChannel between tabs
 on the same origin is the obvious channel).
 
-- [ ] T17.1 — Scope cross-tab sync #phase17 @ready target:phase17
+- [x] T17.1 — Scope cross-tab sync #phase17 @ready target:phase17 _done:2026-06-28
   - **Files**: `docs/specs/phase-17-cross-tab-sync/{README,requirements,design}.md`,
     `packages/ui/src/store/sessions.ts`,
     `packages/ui/src/lib/broadcast.ts` (new)
@@ -779,6 +779,94 @@ on the same origin is the obvious channel).
     - User has signed off on the spec
     - Implementation tasks have been added to TASKS.MD with
       concrete Done when criteria
+
+The scope task landed on: **central SSE + SharedWorker**. The leader's
+per-message SSE keeps Phase 14's role (live per-turn events:
+`message_start`, `token`, `tool_call`, `done`); a new
+`GET /api/sync` carries only state-change events (`message_appended`,
+`session_renamed`, `session_meta_updated`, `approval_required`,
+`tool_result`, `message_done`, `error`). The SharedWorker owns the
+one central connection per origin and dispatches events to tabs via
+`MessageChannel`. Tab UUIDs (`X-CW-Tab`) deduplicate the leader's
+optimistic append from its own `message_appended` echo. Resync on
+worker reconnect is tab-side (re-`loadTranscript` + `loadSessions`)
+for V1; server-side cursor replay is documented as the V2 path.
+
+- [x] T17.2 — Server: SyncHub + GET /api/sync #phase17 @ready target:phase17 _done:2026-06-28
+  - **Files**: `packages/server/src/sync-hub.ts` (new),
+    `packages/server/src/sync-hub.test.ts` (new),
+    `packages/server/src/routes/sync.ts` (new),
+    `packages/server/src/routes/sync.test.ts` (new),
+    `packages/server/src/app.ts`,
+    `packages/server/src/interactive-approver.ts`,
+    `packages/server/src/routes/messages.ts`,
+    `packages/server/src/routes/messages.test.ts`,
+    `docs/specs/phase-17-cross-tab-sync/{README,requirements,design}.md` (new)
+  - **Deps**: none
+  - **Done when**:
+    - `SyncHub` unit tests pass (subscribe, unsubscribe, broadcast,
+      dead-writer removal, empty-set no-op)
+    - `GET /api/sync` opens a persistent SSE stream, registers
+      with `SyncHub`, unsubscribes on `req.raw.on('close')`
+    - `InteractiveApprover` writes `approval_required` / `tool_result`
+      to `SyncHub` instead of the per-request `SSEWriter`
+    - Messages route reads `X-CW-Tab` header (falls back to
+      `"anonymous"`), stashes the originator on the in-flight
+      `SessionRuntime`, and broadcasts `message_appended` after
+      each `appendMessage` with `{ sessionId, message, originator, ts }`
+    - The leader's per-message SSE event vocabulary is unchanged
+      (`message_start` / `token` / `tool_call` / `done`)
+    - `docs/specs/phase-17-cross-tab-sync/{README,requirements,design}.md`
+      exist and match the implementation
+    - `bun run typecheck && bun test` is green
+
+- [ ] T17.3 — UI: SharedWorker + tab UUID + reducer #phase17 @ready target:phase17
+  - **Files**: `packages/ui/src/workers/sync.worker.ts` (new),
+    `packages/ui/src/workers/sync-client.ts` (new),
+    `packages/ui/src/workers/sync.worker.test.ts` (new, mocked),
+    `packages/ui/src/store/sessions.ts`,
+    `packages/ui/src/store/sessions.test.ts`,
+    `packages/ui/src/store/reducer.ts`,
+    `packages/ui/src/store/reducer.test.ts`,
+    `packages/ui/src/store/stream.ts`,
+    `packages/ui/src/App.tsx`,
+    `packages/ui/src/api/types.ts`
+  - **Deps**: T17.2
+  - **Done when**:
+    - `SharedWorker` connects to `GET /api/sync` on boot,
+      reconnects with exponential backoff on disconnect (capped
+      30s, max 5 retries)
+    - `SharedWorker` assigns each tab a UUID and delivers it via
+      a `registered` message on connect
+    - Worker emits `resync` on every (re)connect; tabs respond
+      with `loadTranscript` + `loadSessions` (debounced 1s)
+    - Tabs include `X-CW-Tab: <tabId>` on POST `/messages` via
+      `sendMessageStreaming`
+    - Reducer handles `message_appended` idempotently (skip if
+      `id` already present) and originator-aware (skip if
+      `originator === state.tabId`)
+    - Other state events (`session_renamed`, `session_meta_updated`,
+      `approval_required`, `tool_result`, `message_done`, `error`)
+      route through `applyServerEvent` as already specced
+    - `App.tsx` mounts `initSync` on boot; events flow into the
+      store via the listener
+    - `bun run typecheck && bun test` is green
+
+- [ ] T17.4 — End-to-end smoke + ship #phase17 @ready target:phase17
+  - **Files**: `docs/architecture.md`, `CLAUDE.md` (project)
+  - **Deps**: T17.3
+  - **Done when**:
+    - Manual smoke (two tabs at `/?session=<id>`): Tab A sends,
+      Tab B sees the user message + assistant reply; Tab A's
+      approval appears in Tab B; either tab can click Approve
+      and both see `tool_result`; sidebar updates propagate
+    - When the central SSE drops mid-burst, the worker
+      reconnects and `resync` brings both tabs back to the
+      on-disk truth
+    - `docs/architecture.md` runtime topology shows the
+      SharedWorker + central SSE alongside per-message SSE
+    - `CLAUDE.md` (project) Phase status reflects Phase 17 done
+    - `bun run typecheck && bun test` is green
 
 ### Phase 18 — MCP support
 The `Tool` interface is already provider-agnostic ([[phase-03-tools|

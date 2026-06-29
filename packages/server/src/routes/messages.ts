@@ -17,9 +17,17 @@
 //     and the loop's AbortSignal fires (see session-runtime + agent
 //     loop)
 //
-// The InteractiveApprover is registered on the SessionRuntime so
-// /approve can find its (requestId → resolver) map without a global
-// registry.
+// T17.2 — `InteractiveApprover` no longer takes a writer; it writes
+// `approval_required` / `tool_result` to the central SSE via
+// SyncHub. The leader's POST stream is therefore per-turn-lifecycle
+// only; cross-tab state (new messages, approvals) flows via the
+// central SSE owned by the SharedWorker.
+//
+// The messages route reads `X-CW-Tab` from the POST headers (a UUID
+// the SharedWorker assigned on connect) and stamps it on every
+// `message_appended` event it broadcasts. The originating tab
+// dedupes by `originator === tabId` in the reducer; re-connecting
+// tabs dedupe by `message.id`.
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { z } from "zod";
@@ -31,6 +39,7 @@ import { InteractiveApprover } from "../interactive-approver.js";
 import { ToolRegistry } from "@computerworks/agent";
 import { SessionRegistry, type SessionRuntime } from "../session-runtime.js";
 import { SessionStore } from "../session-store.js";
+import { SyncHub } from "../sync-hub.js";
 import { createSSEWriter, type SSEWriter } from "../sse-writer.js";
 import type { ServerEvent } from "../sse.js";
 import type { Config } from "../config.js";
@@ -53,12 +62,19 @@ const MessageBody = z.object({
     .optional(),
 });
 
+/** Header name for the tab UUID assigned by the SharedWorker. */
+export const TAB_ID_HEADER = "x-cw-tab";
+
 export interface RunAgentDeps {
   store: SessionStore;
   registry: SessionRegistry;
   config: Config;
   /** Provider factory: given overrides, returns a Provider instance. */
   createProvider: (overrides?: ProviderOverrides) => Provider;
+  /** T17.2 — central SSE hub; broadcasts `message_appended` (and is
+   *  used by `InteractiveApprover` for `approval_required` /
+   *  `tool_result`). Required. */
+  syncHub: SyncHub;
 }
 
 function defaultMemoryRoot(): string {
@@ -83,11 +99,28 @@ export async function runAgentForSession(
 ): Promise<number> {
   const signal = runtime.controller.signal;
 
+  // T17.2 — originator is the tab UUID from the SharedWorker.
+  // Falls back to "anonymous" for clients that bypass the worker
+  // (curl, e2e tests).
+  const originator = runtime.originator ?? "anonymous";
+
+  const broadcastMessage = (msg: Message): void => {
+    deps.syncHub.broadcast({
+      type: "message_appended",
+      sessionId,
+      message: { role: msg.role, content: msg.content },
+      originator,
+      ts: new Date().toISOString(),
+    });
+  };
+
   try {
-    await deps.store.appendMessage(sessionId, {
+    const userMsg: Message = {
       role: "user",
       content: userContent,
-    });
+    };
+    await deps.store.appendMessage(sessionId, userMsg);
+    broadcastMessage(userMsg);
 
     const meta = await deps.store.get(sessionId);
     if (!meta) throw new Error("session disappeared");
@@ -170,6 +203,7 @@ export async function runAgentForSession(
       const newMessages = history.slice(initialHistoryLength);
       for (const msg of newMessages) {
         await deps.store.appendMessage(sessionId, msg);
+        broadcastMessage(msg);
       }
       throw err;
     }
@@ -179,6 +213,7 @@ export async function runAgentForSession(
     const newMessages = history.slice(initialHistoryLength);
     for (const msg of newMessages) {
       await deps.store.appendMessage(sessionId, msg);
+      broadcastMessage(msg);
     }
 
     // T12.2 — Fire-and-forget LLM-generated title. Skipped when the
@@ -190,7 +225,9 @@ export async function runAgentForSession(
         store: deps.store,
         createProvider: deps.createProvider,
         notify: (ev) => {
-          if (!writer.closed) writer.write(ev);
+          // T17.2 — title updates also route via the central SSE so
+          // every tab on this origin sees the rename.
+          deps.syncHub.broadcast(ev);
         },
       },
       sessionId,
@@ -248,10 +285,16 @@ export async function registerMessagesRoute(
     // client disconnect during startup still flips `closed` and we
     // don't leak an orphaned runtime.
     const writer = createSSEWriter(reply);
-    const approver = new InteractiveApprover(writer, id, [], [], {
+    // T17.2 — read the tab UUID (assigned by the SharedWorker). The
+    // approver stashes it on the runtime via originator.
+    const tabIdHeader = req.headers[TAB_ID_HEADER];
+    const originator = typeof tabIdHeader === "string" && tabIdHeader.length > 0
+      ? tabIdHeader
+      : "anonymous";
+    const approver = new InteractiveApprover(deps.syncHub, id, [], [], {
       timeoutMs: 5 * 60_000,
     });
-    const start = deps.registry.startIfIdle(id, approver);
+    const start = deps.registry.startIfIdle(id, approver, originator);
     if (start.busy) {
       // Race: another request started a turn between our check
       // and our register. Emit an error frame and bail.

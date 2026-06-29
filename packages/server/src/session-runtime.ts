@@ -6,6 +6,11 @@
 // on the runtime so /approve can find the right (requestId → resolver)
 // map without a global registry — there's exactly one approver per
 // in-flight turn, and exactly one turn per session.
+//
+// T17.2 — runtime carries the originator tab UUID (X-CW-Tab from the
+// originating POST). The messages route uses it when broadcasting
+// `message_appended` so the originating tab can dedupe its own
+// optimistic user-message append.
 
 export interface ApproverHandle {
   /** Resolve a pending approval. Returns true if a resolver fired. */
@@ -20,6 +25,8 @@ export interface SessionRuntime {
   controller: AbortController;
   approver: ApproverHandle;
   startedAt: number;
+  /** T17.2 — tab UUID from the originating POST (X-CW-Tab). "anonymous" if missing. */
+  originator: string;
 }
 
 export class SessionRegistry {
@@ -30,6 +37,7 @@ export class SessionRegistry {
   startIfIdle(
     sessionId: string,
     approver: ApproverHandle,
+    originator: string = "anonymous",
   ): { runtime: SessionRuntime; busy: false } | { busy: true } {
     const existing = this.runtimes.get(sessionId);
     if (existing) return { busy: true };
@@ -38,6 +46,7 @@ export class SessionRegistry {
       controller: new AbortController(),
       approver,
       startedAt: Date.now(),
+      originator,
     };
     this.runtimes.set(sessionId, runtime);
     return { runtime, busy: false };

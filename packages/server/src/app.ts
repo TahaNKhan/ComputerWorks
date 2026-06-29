@@ -12,6 +12,11 @@
 // single GET `/` fallback that returns `index.html`. The router
 // uses `?session=<id>` query strings (not paths), so a single
 // fallback is enough — no `/*` catch-all.
+//
+// T17.2 — instantiates a `SyncHub` (one per app) and exposes the
+// `GET /api/sync` endpoint. The hub carries state-change events
+// for cross-tab sync via the SharedWorker; it's disjoint from the
+// per-message SSE that the messages route owns.
 
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
@@ -21,11 +26,13 @@ import { createAnthropicProvider } from "@computerworks/core";
 import type { Config } from "./config.js";
 import { SessionStore } from "./session-store.js";
 import { SessionRegistry } from "./session-runtime.js";
+import { SyncHub } from "./sync-hub.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerMessagesRoute, type RunAgentDeps } from "./routes/messages.js";
 import { registerApproveRoute } from "./routes/approve.js";
 import { registerCancelRoute } from "./routes/cancel.js";
+import { registerSyncRoute } from "./routes/sync.js";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -76,6 +83,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
       ?? join(homedir(), ".computerworks", "sessions"),
   });
   const registry = opts.registry ?? new SessionRegistry();
+  const syncHub = new SyncHub();
 
   await registerHealthRoutes(app);
   await registerSessionRoutes(app, store);
@@ -84,6 +92,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
     store,
     registry,
     config: opts.config,
+    syncHub,
     createProvider: opts.createProvider ?? (() =>
       createAnthropicProvider({
         ...(opts.config.providers?.anthropic?.baseUrl
@@ -100,6 +109,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
   await registerMessagesRoute(app, agentDeps, { autoApprove: opts.autoApprove ?? false });
   await registerApproveRoute(app, registry);
   await registerCancelRoute(app, registry);
+  await registerSyncRoute(app, { syncHub });
 
   // T15.1 — Serve the built UI bundle from the same origin as the
   // API. `serve: false` makes @fastify/static NOT auto-register any
@@ -129,7 +139,12 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
 
   // Test handle — exposes internal pieces without leaking them on
   // the public route surface.
-  (app as unknown as { __cw: unknown }).__cw = { store, registry, uiRoot: opts.uiRoot };
+  (app as unknown as { __cw: unknown }).__cw = {
+    store,
+    registry,
+    syncHub,
+    uiRoot: opts.uiRoot,
+  };
 
   return app;
 }

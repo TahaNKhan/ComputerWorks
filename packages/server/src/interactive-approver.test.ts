@@ -19,6 +19,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { InteractiveApprover } from "./interactive-approver.js";
+import { SyncHub } from "./sync-hub.js";
 import type { SSEWriter } from "./sse-writer.js";
 import type { ServerEvent } from "./sse.js";
 import type { ApprovalRequest } from "@computerworks/agent";
@@ -59,13 +60,20 @@ function makeApprover(opts: {
   session?: string[];
   timeoutMs?: number;
 }) {
-  return new InteractiveApprover(
-    opts.writer,
+  // T17.2 — InteractiveApprover no longer takes a writer; it
+  // broadcasts through SyncHub. Tests still pass a fake writer;
+  // we wrap it in a hub and surface events back to the test via
+  // a small wrapper that re-uses the writer's `events` array.
+  const hub = new SyncHub();
+  hub.subscribe(opts.writer);
+  const approver = new InteractiveApprover(
+    hub,
     "s1",
     opts.session ?? [],
     opts.global ?? [],
     { timeoutMs: opts.timeoutMs },
   );
+  return approver;
 }
 
 // ─── global shell allowlist ───────────────────────────────────────────────
