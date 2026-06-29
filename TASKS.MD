@@ -821,6 +821,11 @@ for V1; server-side cursor replay is documented as the V2 path.
     - `bun run typecheck && bun test` is green
 
 - [x] T17.3 — UI: SharedWorker + tab UUID + reducer #phase17 @ready target:phase17 _done:2026-06-28
+  - **Post-fix** (`5882576`): the SharedWorker connection used a
+    `MessageChannel` and listened on the transferred (neutered)
+    port — fixed by using `sw.port` directly. `InteractiveApprover`
+    also now writes to the leader's per-message stream so the
+    leader's tool calls work even if the SharedWorker fails.
   - **Files**: `packages/ui/src/workers/sync.worker.ts` (new),
     `packages/ui/src/workers/sync-client.ts` (new),
     `packages/ui/src/workers/sync.worker.test.ts` (new, mocked),
