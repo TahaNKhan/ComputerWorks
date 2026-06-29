@@ -1014,7 +1014,7 @@ string.
       `string[]` (already typed in `api/types.ts`)
     - `bun run typecheck && bun test` is green
 
-- [ ] T18.4 — Docs + smoke + ship #phase18 @ready target:phase18
+- [x] T18.4 — Docs + smoke + ship #phase18 @ready target:phase18 _done:2026-06-29
   - **Files**: `docs/architecture.md` (only if a node-level
     diagram change is needed; otherwise skip), `CLAUDE.md`
     (project), `docs/specs/phase-18-pattern-approval/README.md`

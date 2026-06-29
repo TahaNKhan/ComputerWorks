@@ -101,7 +101,22 @@ ASCII box-drawing in diagrams is forbidden; use Mermaid.
   the leading tab's optimistic append from its own
   `message_appended` echo. Resync on worker reconnect is tab-side
   (`loadTranscript` + `loadSessions`).
-- 🎉 Build complete — no further phases planned (Phase 17 was the
+- ✅ Phase 18 — Pattern-based command approval per session merged
+  into main on 2026-06-29. The half-built `SessionMeta.allowlist`
+  + `approve_for_session` plumbing finally wires up end-to-end:
+  clicking the existing "Always" button now persists a pattern to
+  `meta.allowlist`, and a new "Always allow `<token>` …" button on
+  `run_shell` approvals whitelists an entire command family in one
+  click. Pattern grammar is intentionally tiny — `tool:<name>` and
+  `tool:<name> <prefix>` — no regex, no escape. The `agent` package
+  is untouched; the wiring lives inside `InteractiveApprover` and
+  `routes/messages.ts`. `SessionStore` gained a per-session write
+  queue (`enqueueWrite`) so the new `onAllowlistExtended` patch and
+  the agent loop's `appendMessage`-triggered `updatedAt` bump
+  can't clobber each other. The audit log distinguishes
+  `auto_approve` (pattern matched) from `approve_once` (manual
+  click).
+- 🎉 Build complete — no further phases planned (Phase 18 was the
   last architectural change; the codebase is now `main`-only, no
   phase branches)
 

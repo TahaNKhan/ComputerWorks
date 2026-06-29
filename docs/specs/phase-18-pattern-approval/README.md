@@ -1,8 +1,8 @@
 # Phase 18 — Pattern-based command approval per session
 
-**Status:** done (spec)
+**Status:** done
 **Started:** 2026-06-28
-**Done:** 2026-06-28 (T18.1 scope; T18.2/T18.3/T18.4 follow)
+**Done:** 2026-06-29
 
 ## Isolation
 - **Branch:** `main`
@@ -10,10 +10,10 @@
 
 ## Pointers
 - **Tasks:** T18.x IDs in `TASKS.MD`
-  - T18.1 — scope (this doc)
-  - T18.2 — server-side pattern matching + approver wiring
-  - T18.3 — UI derived-pattern suggestion
-  - T18.4 — tests, docs, ship
+  - T18.1 — scope (this doc) — `_done:2026-06-28`
+  - T18.2 — server-side pattern matching + approver wiring — `_done:2026-06-29` (commit `00bb59d`)
+  - T18.3 — UI derived-pattern suggestion — `_done:2026-06-29` (commit `a09a115`)
+  - T18.4 — docs + smoke + ship — `_done:2026-06-29`
 - **Spec:**
   - [requirements.md](requirements.md)
   - [design.md](design.md)
