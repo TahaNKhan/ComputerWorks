@@ -746,6 +746,90 @@ those are scheduled yet.
 
 ---
 
+Brainstorm from `next.md` (line items 1-3; **item 4 is truncated to
+`add ` and item 5 is blank — flag this back to the user to
+complete**). Each phase below is a **scope task**: write
+requirements.md + design.md, get user sign-off, then break the
+implementation into follow-on tasks.
+
+### Phase 17 — Cross-tab session sync
+Brain dump (`next.md:1`): "background JS worker on the browser?"
+
+Multiple browser tabs on the same session should see the same
+conversation, approval requests, and pending state. The
+per-message SSE shape from [[phase-14-per-message-sse|Phase 14]]
+makes each tab's POST /messages isolated on the wire — the
+remaining work is in the UI store (BroadcastChannel between tabs
+on the same origin is the obvious channel).
+
+- [ ] T17.1 — Scope cross-tab sync #phase17 @ready target:phase17
+  - **Files**: `docs/specs/phase-17-cross-tab-sync/{README,requirements,design}.md`,
+    `packages/ui/src/store/sessions.ts`,
+    `packages/ui/src/lib/broadcast.ts` (new)
+  - **Deps**: none
+  - **Done when**:
+    - `requirements.md` answers: which state is shared (messages?
+      active session? pending approvals?), what conflict semantics
+      apply when two tabs send a message at the same time, what
+      channel is used (BroadcastChannel vs SharedWorker vs
+      localStorage events), and how the work interacts with the
+      existing per-message SSE
+    - `design.md` names the channel, the message shapes, and the
+      store actions that publish + subscribe
+    - User has signed off on the spec
+    - Implementation tasks have been added to TASKS.MD with
+      concrete Done when criteria
+
+### Phase 18 — MCP support
+The `Tool` interface is already provider-agnostic ([[phase-03-tools|
+Phase 3]]) so the server can consume tools from MCP-compatible
+servers without changing the agent loop. The remaining work is
+discovery + transport (stdio for local MCP servers, HTTP+SSE for
+remote ones).
+
+- [ ] T18.1 — Scope MCP support #phase18 @ready target:phase18
+  - **Files**: `docs/specs/phase-18-mcp/{README,requirements,design}.md`,
+    `packages/mcp-client/` (new), `packages/server/src/tools/index.ts`
+  - **Deps**: none
+  - **Done when**:
+    - `requirements.md` answers: which MCP transports are
+      supported (stdio, HTTP+SSE), how servers are configured
+      (`~/.computerworks/config.ts` vs runtime discovery), how the
+      approval model extends to MCP tools, how tool descriptions
+      flow back to the model, and what happens when an MCP server
+      goes down mid-turn
+    - `design.md` names the transport adapter, the registration
+      flow, the merge with the default tool set, and the failure
+      modes
+    - User has signed off on the spec
+    - Implementation tasks have been added to TASKS.MD with
+      concrete Done when criteria
+
+### Phase 19 — Skills support
+Skills are pre-defined bundles of (prompt prefix + tool
+allowlist + optional setup script) the user can invoke by name.
+Built-ins live in the codebase; user-defined ones live in
+`~/.computerworks/skills/<name>/`.
+
+- [ ] T19.1 — Scope skills support #phase19 @ready target:phase19
+  - **Files**: `docs/specs/phase-19-skills/{README,requirements,design}.md`,
+    `packages/skills/` (new), `packages/server/src/system-prompt.ts`,
+    `packages/ui/src/components/SkillsPalette.tsx` (new)
+  - **Deps**: none
+  - **Done when**:
+    - `requirements.md` answers: what a skill is (its schema —
+      prompt fragments, tool allowlist, setup script, optional
+      version), how a user invokes one (slash command? palette?
+      both?), how they're scoped (per-session vs global), how
+      approval interacts with a skill's tool allowlist, and how
+      built-in vs user-defined skills differ
+    - `design.md` names the registry, the loader, the system-prompt
+      injection, the UI surface, and the storage format
+    - User has signed off on the spec
+    - Implementation tasks have been added to TASKS.MD with
+      concrete Done when criteria
+
+---
 
 ## Suggested commit sequence
 
