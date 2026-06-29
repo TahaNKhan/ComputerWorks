@@ -139,6 +139,30 @@ describe("parseSSEFrame", () => {
     expect(ev).toEqual({ type: "session_renamed", sessionId: "abc", title: "bun workspace setup" });
   });
 
+  test("parses message_appended (T17.3)", () => {
+    const body = JSON.stringify({
+      sessionId: "abc",
+      message: { role: "assistant", content: [{ type: "text", text: "hello" }] },
+      originator: "138d1c40-763e-4c5a-aa71-7cdfd94a0ee3",
+      ts: "2026-06-29T03:56:15.640Z",
+    });
+    const ev = parseSSEFrame(`event: message_appended\ndata: ${body}`);
+    expect(ev).toEqual({
+      type: "message_appended",
+      sessionId: "abc",
+      message: { role: "assistant", content: [{ type: "text", text: "hello" }] },
+      originator: "138d1c40-763e-4c5a-aa71-7cdfd94a0ee3",
+      ts: "2026-06-29T03:56:15.640Z",
+    });
+  });
+
+  test("returns null for message_appended with missing fields", () => {
+    expect(parseSSEFrame("event: message_appended\ndata: {}")).toBeNull();
+    expect(
+      parseSSEFrame('event: message_appended\ndata: {"sessionId":"abc"}'),
+    ).toBeNull();
+  });
+
   test("returns null for session_renamed with missing fields", () => {
     expect(parseSSEFrame("event: session_renamed\ndata: {}")).toBeNull();
     expect(

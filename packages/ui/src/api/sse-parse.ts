@@ -144,6 +144,24 @@ function reconstructServerEvent(
       if (!sessionId || !title) return null;
       return { type: "session_renamed", sessionId, title };
     }
+    case "message_appended": {
+      // T17.3 — central-SSE-only event. Pass through the server's
+      // payload verbatim (the reducer needs originator + ts for
+      // dedupe). Validates the field types but doesn't reject on
+      // missing fields — the server controls the shape; the
+      // reducer is the one that cares about specific fields.
+      const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
+      const originator = typeof body.originator === "string" ? body.originator : "";
+      const ts = typeof body.ts === "string" ? body.ts : "";
+      if (!sessionId || !originator || !ts) return null;
+      return {
+        type: "message_appended",
+        sessionId,
+        message: (body.message ?? { role: "assistant", content: "" }) as ServerEvent extends { type: "message_appended"; message: infer M } ? M : never,
+        originator,
+        ts,
+      };
+    }
     case "error":
       if (typeof body.message === "string") return { type: "error", message: body.message };
       return null;
