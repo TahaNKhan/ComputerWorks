@@ -852,7 +852,7 @@ for V1; server-side cursor replay is documented as the V2 path.
       store via the listener
     - `bun run typecheck && bun test` is green
 
-- [ ] T17.4 — End-to-end smoke + ship #phase17 @ready target:phase17
+- [x] T17.4 — End-to-end smoke + ship #phase17 @ready target:phase17 _done:2026-06-28
   - **Files**: `docs/architecture.md`, `CLAUDE.md` (project)
   - **Deps**: T17.3
   - **Done when**:

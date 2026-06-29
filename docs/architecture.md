@@ -18,13 +18,16 @@ unless you pass `--allow-non-loopback`.
 ```mermaid
 flowchart TB
     Browser["Browser<br/>http://127.0.0.1:4747<br/>(React SPA, mobile-first)"]
-    Server["Server — packages/server<br/>Fastify on Bun · @fastify/static<br/>127.0.0.1:4747 (loopback only by default)"]
+    Worker["SharedWorker — sync.worker.ts<br/>one per origin; owns the central SSE"]
+    Server["Server — packages/server<br/>Fastify on Bun · @fastify/static · SyncHub<br/>127.0.0.1:4747 (loopback only by default)"]
     Disk["Disk — ~/.computerworks/<br/>config.ts · sessions/&lt;id&gt;/<br/>memory/notes/"]
     Provider["LLM Provider<br/>Anthropic-compatible<br/>Bearer auth via MINIMAX_TOKEN"]
 
     Browser -- "GET / → index.html<br/>GET /assets/* → UI bundle" --> Server
-    Browser -- "POST /api/sessions/:id/messages<br/>(SSE in response)" --> Server
+    Browser -- "POST /api/sessions/:id/messages<br/>X-CW-Tab: tab-uuid<br/>(SSE in response, leader only)" --> Server
     Browser -- "POST /api/sessions/:id/approve" --> Server
+    Browser <-- "MessageChannel: events / registered / resync" --> Worker
+    Worker -- "GET /api/sync (one SSE per origin,<br/>state-change events only)" --> Server
     Server --> Disk
     Server -- "messages.stream()" --> Provider
 ```
@@ -61,6 +64,23 @@ Post-Phase 14, **one HTTP request carries the whole turn**. The POST
 that delivers the user message is also the SSE response the UI reads.
 There is no separate `GET /stream` route, no broadcast manager, no
 shared fanout.
+
+Post-Phase 17, **two SSE streams** coexist for cross-tab sync, each
+with a disjoint event vocabulary:
+
+| Stream | Event types | Recipients |
+| --- | --- | --- |
+| Per-message SSE (POST response) | `message_start`, `token`, `tool_call`, `done` | leader tab only |
+| Central SSE (`GET /api/sync`) | `message_appended`, `session_renamed`, `session_meta_updated`, `approval_required`, `tool_result`, `message_done`, `error` | every tab on the origin, via the SharedWorker |
+
+A SharedWorker per origin owns the central SSE connection and
+fan-outs events to its connected tabs via `MessageChannel`. Each
+tab gets a UUID on connect; tabs include it as `X-CW-Tab` on their
+POST requests so the server can stamp `message_appended` events
+with the originator — the leading tab's reducer dedupes its own
+echo. When the central SSE drops and reconnects, the worker emits
+`resync`; tabs respond with `loadTranscript` + `loadSessions` to
+catch up after any events missed during the disconnect window.
 
 ```mermaid
 sequenceDiagram

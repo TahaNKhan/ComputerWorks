@@ -91,7 +91,17 @@ ASCII box-drawing in diagrams is forbidden; use Mermaid.
   bun run start` is the new workflow; `dev:watch` runs Vite
   `--watch` and `bun --watch` in parallel for iteration. Vite is
   build-only (no dev server); the trade-off is no HMR.
-- 🎉 Build complete — no further phases planned (Phase 15 was the
+- ✅ Phase 17 — Cross-tab session sync merged into main on 2026-06-28.
+  Two SSE streams with disjoint event vocabularies: the per-message
+  SSE keeps Phase 14's job (live per-turn events: message_start /
+  token / tool_call / done); a new central SSE carries
+  state-change events only (message_appended / session_renamed /
+  approval_required / tool_result / etc.) for every tab on the
+  origin via a SharedWorker. Tab UUIDs (`X-CW-Tab`) deduplicate
+  the leading tab's optimistic append from its own
+  `message_appended` echo. Resync on worker reconnect is tab-side
+  (`loadTranscript` + `loadSessions`).
+- 🎉 Build complete — no further phases planned (Phase 17 was the
   last architectural change; the codebase is now `main`-only, no
   phase branches)
 
