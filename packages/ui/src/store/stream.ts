@@ -26,6 +26,10 @@ export interface StreamOptions {
   /** Called once when the stream ends with a terminal `done` event
    *  OR the response body closes cleanly. */
   onDone?: () => void;
+  /** T17.3 — the originating tab's UUID (assigned by the SharedWorker
+   *  on connect). Sent on the POST as the `X-CW-Tab` header so the
+   *  server can stamp it on `message_appended` events. */
+  originator?: string;
 }
 
 interface ActiveStream {
@@ -70,9 +74,17 @@ export async function sendMessageStreaming(
   let count = 0;
   try {
     const url = `${API_BASE_URL}/api/sessions/${encodeURIComponent(sessionId)}/messages`;
+    // T17.3 — include the tab UUID so the server can stamp
+    // `message_appended` events with our originator. The reducer
+    // uses that to skip our own broadcast echo on the central SSE.
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+    };
+    if (opts.originator) headers["X-CW-Tab"] = opts.originator;
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      headers,
       body: JSON.stringify({ content }),
       signal: controller.signal,
     });

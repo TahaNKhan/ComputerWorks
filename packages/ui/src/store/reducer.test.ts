@@ -274,6 +274,75 @@ describe("reduceStreamEvent — approval_required", () => {
   });
 });
 
+describe("reduceStreamEvent — message_appended (T17.3)", () => {
+  it("appends the message to the target session", () => {
+    const s = stateWith("s1", [{
+      id: "u-1", role: "user", parts: [{ kind: "text", text: "hi" }],
+    }]);
+    const next = reduceStreamEvent(s, "s1", {
+      type: "message_appended",
+      sessionId: "s1",
+      message: { role: "assistant", content: [{ type: "text", text: "hello" }] },
+      originator: "tab-other",
+      ts: "2026-06-28T12:00:00.000Z",
+    });
+    const parts = messagesOf(next, "s1")[1]!.parts;
+    expect(parts).toEqual([{ kind: "text", text: "hello" }]);
+  });
+
+  it("skips the event when originator matches our tabId", () => {
+    const s = {
+      ...stateWith("s1"),
+      tabId: "tab-us",
+      messagesBySession: {
+        s1: [{
+          id: "u-1", role: "user", parts: [{ kind: "text", text: "hi" }],
+        }],
+      },
+    };
+    const before = messagesOf(s, "s1");
+    const next = reduceStreamEvent(s, "s1", {
+      type: "message_appended",
+      sessionId: "s1",
+      message: { role: "assistant", content: [{ type: "text", text: "echo" }] },
+      originator: "tab-us",
+      ts: "2026-06-28T12:00:00.000Z",
+    });
+    // The originator's own echo: the reducer returns the same state
+    // object (identity-preserving no-op).
+    expect(messagesOf(next, "s1")).toBe(before);
+  });
+
+  it("dedupes by ts key (server-stable timestamp)", () => {
+    const ts = "2026-06-28T12:00:00.000Z";
+    const baseEvent = {
+      type: "message_appended" as const,
+      sessionId: "s1",
+      message: { role: "assistant" as const, content: [{ type: "text" as const, text: "hello" }] },
+      originator: "tab-other",
+      ts,
+    };
+    // First event: appends.
+    const after1 = reduceStreamEvent(initialState(), "s1", baseEvent);
+    expect(messagesOf(after1, "s1")).toHaveLength(1);
+    // Second event with same ts: no-op (same state object).
+    const after2 = reduceStreamEvent(after1, "s1", baseEvent);
+    expect(messagesOf(after2, "s1")).toBe(messagesOf(after1, "s1"));
+  });
+
+  it("starts a session with the message when messagesBySession is empty", () => {
+    const s = stateWith("s1", []);
+    const next = reduceStreamEvent(s, "s1", {
+      type: "message_appended",
+      sessionId: "s1",
+      message: { role: "user", content: "first message" },
+      originator: "tab-other",
+      ts: "2026-06-28T12:00:00.000Z",
+    });
+    expect(messagesOf(next, "s1")).toHaveLength(1);
+  });
+});
+
 describe("reduceStreamEvent — message_done / done", () => {
   it("message_done finalizes the streaming message and goes idle", () => {
     const s = stateWith("s1", [{

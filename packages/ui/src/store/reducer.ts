@@ -49,10 +49,34 @@ export interface SessionsState {
   errorMessage: string | null;
   /** Whether the initial session list fetch has completed. */
   initialized: boolean;
+  /** T17.3 — tab UUID assigned by the SharedWorker. Set once on
+   *  mount (the listener awaits `initSync`) and used by the
+   *  reducer to dedupe `message_appended` events the originating
+   *  tab's own POST triggered. */
+  tabId: string | null;
 }
 
 export function makeId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// T17.3 — convert a server-side message to a UiMessage. The
+// `id` is a client-generated prefix + the server's ts (which is
+// stable across subscribers); `_cw_ts` carries the bare ts for
+// idempotent dedupe in the reducer.
+function serverMessageToUi(message: { role: string; content: unknown }, ts: string): UiMessage {
+  const role: "user" | "assistant" = message.role === "user" ? "user" : "assistant";
+  const text =
+    typeof message.content === "string"
+      ? message.content
+      : Array.isArray(message.content)
+        ? (message.content.find((b: { type?: string }) => b.type === "text") as { text?: string } | undefined)?.text ?? ""
+        : "";
+  return {
+    id: `m-${ts}`,
+    role,
+    parts: text ? [{ kind: "text", text }] : [],
+  };
 }
 
 // ─── Helpers (exported for unit testing) ──────────────────────────────────
@@ -246,6 +270,24 @@ export function reduceStreamEvent(
       );
       break;
     }
+    case "message_appended": {
+      // T17.3 — central-SSE-only event. Originator dedupe: the
+      // leading tab has the message already (optimistic append),
+      // so we skip. Re-connect dedupe uses the server's `ts` (a
+      // per-message stable timestamp) — `id` is client-generated
+      // and doesn't survive re-mount, but `ts` does.
+      if (ev.originator === state.tabId) return state;
+      const sessionMessages = messagesOf(state, ev.sessionId);
+      const tsKey = `${ev.sessionId}:${ev.ts}`;
+      if (sessionMessages.some((m) => (m as UiMessage & { _cw_ts?: string })._cw_ts === tsKey)) {
+        nextMsgs = sessionMessages;
+        break;
+      }
+      const fresh = serverMessageToUi(ev.message, ev.ts);
+      (fresh as UiMessage & { _cw_ts?: string })._cw_ts = tsKey;
+      nextMsgs = [...sessionMessages, fresh];
+      break;
+    }
     case "error": {
       errorMessage = ev.message;
       status = "error";
@@ -279,5 +321,6 @@ export function initialState(): SessionsState {
     status: "idle",
     errorMessage: null,
     initialized: false,
+    tabId: null,
   };
 }

@@ -51,6 +51,8 @@ export interface SessionsStore extends SessionsState {
   deleteSession: (id: string) => Promise<void>;
   renameSession: (id: string, title: string) => Promise<void>;
   switchSession: (id: string | null) => Promise<void>;
+  /** T17.3 — set the SharedWorker-assigned tab UUID. Idempotent. */
+  setTabId: (tabId: string) => void;
   loadTranscript: (id: string) => Promise<void>;
 
   // ─── messaging ───────────────────────────────────────────────────────
@@ -99,6 +101,11 @@ export const useSessionsStore = create<SessionsStore>((set, get) => ({
         errorMessage: (err as Error).message ?? "Failed to load sessions",
       });
     }
+  },
+
+  setTabId: (tabId) => {
+    if (get().tabId === tabId) return;
+    set({ tabId });
   },
 
   createSession: async (input) => {
@@ -236,6 +243,10 @@ export const useSessionsStore = create<SessionsStore>((set, get) => ({
     // the reducer. Errors land in `errorMessage`; success returns
     // the user to `idle`.
     await sendMessageStreaming(sessionId, trimmed, {
+      // T17.3 — pass the tab UUID so the server can stamp
+      // `message_appended` events with our originator. The reducer
+      // uses this to skip our own broadcast echo on the central SSE.
+      ...(get().tabId ? { originator: get().tabId! } : {}),
       onError: (err) => {
         const message = err instanceof Error ? err.message : String(err);
         set({ errorMessage: message, status: "error" });

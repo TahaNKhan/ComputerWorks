@@ -820,7 +820,7 @@ for V1; server-side cursor replay is documented as the V2 path.
       exist and match the implementation
     - `bun run typecheck && bun test` is green
 
-- [ ] T17.3 — UI: SharedWorker + tab UUID + reducer #phase17 @ready target:phase17
+- [x] T17.3 — UI: SharedWorker + tab UUID + reducer #phase17 @ready target:phase17 _done:2026-06-28
   - **Files**: `packages/ui/src/workers/sync.worker.ts` (new),
     `packages/ui/src/workers/sync-client.ts` (new),
     `packages/ui/src/workers/sync.worker.test.ts` (new, mocked),

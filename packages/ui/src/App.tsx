@@ -24,6 +24,18 @@ import {
   subscribeUrlChange,
 } from "./lib/router.js";
 import { useShortcut, shortcutLabel } from "./lib/shortcuts.js";
+import { connectSyncWorker } from "./workers/sync-client.js";
+import type { ServerEvent } from "./api/types.js";
+
+/** T17.3 — best-effort extraction of the sessionId from a central-SSE
+ *  event. Most state events carry `sessionId`; per-turn lifecycle
+ *  events (`message_start`, `token`, `tool_call`, `done`) do NOT —
+ *  those don't come through the central stream anyway, but be
+ *  defensive: route to activeSessionId as a fallback. */
+function eventSessionId(ev: ServerEvent, fallback: string | null): string | null {
+  if ("sessionId" in ev && typeof ev.sessionId === "string") return ev.sessionId;
+  return fallback;
+}
 
 export function App(): JSX.Element {
   const errorMessage = useSessionsStore((s) => s.errorMessage);
@@ -34,6 +46,9 @@ export function App(): JSX.Element {
   const status = useSessionsStore((s) => s.status);
   const cancelTurn = useSessionsStore((s) => s.cancelTurn);
   const switchSession = useSessionsStore((s) => s.switchSession);
+  const setTabId = useSessionsStore((s) => s.setTabId);
+  const loadTranscript = useSessionsStore((s) => s.loadTranscript);
+  const applyServerEvent = useSessionsStore((s) => s.applyServerEvent);
 
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -43,6 +58,40 @@ export function App(): JSX.Element {
   useEffect(() => {
     setDrawerOpen(false);
   }, [activeSessionId]);
+
+  // T17.3 — boot the SharedWorker once. The worker assigns us a
+  // tabId (used to dedupe our own `message_appended` echoes) and
+  // forwards central-SSE events to the reducer. Resync signals
+  // refresh the active session + sessions list — covers events
+  // missed during SSE flap recovery.
+  useEffect(() => {
+    let unsubEvent: (() => void) | null = null;
+    let unsubResync: (() => void) | null = null;
+    try {
+      const conn = connectSyncWorker();
+      void conn.tabId.then((id) => setTabId(id));
+      unsubEvent = conn.onEvent((ev) => {
+        const sid = eventSessionId(ev, activeSessionId);
+        if (sid) applyServerEvent(sid, ev);
+      });
+      unsubResync = conn.onResync(() => {
+        if (activeSessionId) void loadTranscript(activeSessionId);
+        void loadSessions();
+      });
+    } catch {
+      // SharedWorker unavailable; the per-tab POST stream still
+      // works for the leader tab. Other tabs on this origin fall
+      // back to per-tab polling (TBD).
+    }
+    return () => {
+      unsubEvent?.();
+      unsubResync?.();
+    };
+    // We intentionally only run this once on mount; the listener
+    // closes over the latest activeSessionId via the `getState`
+    // path inside the store via `useSessionsStore.getState()`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Load the session list once on mount.
   useEffect(() => {

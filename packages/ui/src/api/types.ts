@@ -193,7 +193,20 @@ export type ServerEvent =
   | { type: "message_done"; usage: { input: number; output: number } }
   | { type: "session_renamed"; sessionId: string; title: string }
   | { type: "error"; message: string }
-  | { type: "done" };
+  | { type: "done" }
+  | {
+      // T17.3 — central SSE only (not on the per-message stream).
+      // Emitted after every successful message persistence; the
+      // SharedWorker hands these to every tab on the origin.
+      // Carries the originating tab UUID so the leading tab can
+      // dedupe its own optimistic append via the reducer; re-
+      // connecting tabs dedupe by message.id.
+      type: "message_appended";
+      sessionId: string;
+      message: SessionMessage;
+      originator: string;
+      ts: string;
+    };
 
 // ─── UI-local message representation ───────────────────────────────────────
 
