@@ -2,10 +2,21 @@
 // T7.9 — Inline approval card. Renders tool name, description, and
 // optional diff. Approve / Reject / Edit-and-approve buttons POST to
 // /api/sessions/:id/approve via the sessions store.
+//
+// T18.3 — Pattern-based per-session approval. The existing "Always"
+// button now sends `pattern: "tool:" + <toolName>` and reads as
+// "Always allow `<toolName>`". A fourth button appears when the
+// pending approval is for `run_shell` with a string `cmd` whose
+// first token passes `isSafeToken` — it sends
+// `pattern: "tool:run_shell " + <token>` so the user can whitelist
+// an entire command family in one click. See
+// `docs/specs/phase-18-pattern-approval/{requirements,design}.md`
+// and `lib/allowlist-derive.ts` for the derivation helpers.
 
 import React from "react";
 import type { MessagePart } from "../api/types.js";
 import { useSessionsStore } from "../store/sessions.js";
+import { deriveRunShellToken } from "../lib/allowlist-derive.js";
 
 interface Props {
   part: Extract<MessagePart, { kind: "approval" }>;
@@ -18,6 +29,7 @@ export function ApprovalCard({ part }: Props): JSX.Element {
 
   const isActive = pending?.requestId === part.requestId;
   const disabled = !isActive || status === "awaiting-approval" && false;
+  const derived = isActive ? deriveRunShellToken(part.tool) : null;
 
   return (
     <div className={`cw-approval-card ${isActive ? "active" : ""}`}>
@@ -42,11 +54,31 @@ export function ApprovalCard({ part }: Props): JSX.Element {
         </button>
         <button
           type="button"
-          onClick={() => void decide({ kind: "approve_for_session", pattern: part.tool.name })}
+          onClick={() =>
+            void decide({
+              kind: "approve_for_session",
+              pattern: `tool:${part.tool.name}`,
+            })
+          }
           disabled={!isActive}
         >
-          Always
+          Always allow {part.tool.name}
         </button>
+        {derived && (
+          <button
+            type="button"
+            className="cw-allow-prefix"
+            onClick={() =>
+              void decide({
+                kind: "approve_for_session",
+                pattern: `tool:run_shell ${derived.token}`,
+              })
+            }
+            disabled={!isActive}
+          >
+            Always allow {derived.token} …
+          </button>
+        )}
         <button
           type="button"
           className="cw-reject"

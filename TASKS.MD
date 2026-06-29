@@ -970,11 +970,10 @@ string.
       `pattern: "tool:run_shell echo"`
     - `bun run typecheck && bun test` is green
 
-- [ ] T18.3 — UI: derived pattern button #phase18 @ready target:phase18
+- [x] T18.3 — UI: derived pattern button #phase18 @ready target:phase18 _done:2026-06-29
   - **Files**: `packages/ui/src/components/ApprovalCard.tsx`,
-    `packages/ui/src/components/ApprovalCard.test.tsx` (new),
-    `packages/ui/src/store/sessions.ts`,
-    `packages/ui/src/api/types.ts`
+    `packages/ui/src/lib/allowlist-derive.ts` (new),
+    `packages/ui/src/lib/allowlist-derive.test.ts` (new)
   - **Deps**: T18.2
   - **Done when**:
     - `firstToken(cmd: string): string | null` helper returns the
@@ -982,13 +981,20 @@ string.
       with: `"curl -s X"` → `"curl"`, `"  ls -la"` → `"ls"`,
       `"sudo rm -rf /"` → `"sudo"`, `""` → `null`, `"   "`
       → `null`, `"git\tstatus"` → `"git"`
-    - A safety check filters tokens that don't match
-      `^[A-Za-z][A-Za-z0-9._-]*$` — these return `null` from the
-      button-derivation helper and the derived button is
-      suppressed. `"rm; echo x"` → `null`
-    - When the pending approval is for `run_shell` with a string
-      `cmd` whose `firstToken` is non-null, the card renders a
-      fourth button labelled `Always allow <token> …` that emits
+    - `isSafeToken(tok: string): boolean` filters tokens that
+      don't match `^[A-Za-z][A-Za-z0-9._-]*$` — these return
+      `null` from the button-derivation helper and the derived
+      button is suppressed. `"rm; echo x"` → `null`
+    - `deriveRunShellToken(approval)` returns `{ token }` only
+      when the approval is for `run_shell` with a string `cmd`
+      whose first token is safe; returns `null` otherwise. Unit
+      tested for: `run_shell{cmd:"curl …"}` shows the derived
+      button, `read_file{path:"/x"}` doesn't, `run_shell{cmd:""}`
+      doesn't, weird tokens (`/usr/bin/ls`, `rm; echo x`,
+      `1something`) don't
+    - When `deriveRunShellToken` returns non-null, the card
+      renders a fourth button labelled `Always allow <token> …`
+      that emits
       `decide({ kind: "approve_for_session", pattern:
       "tool:run_shell " + token })`
     - For all other tools (and for `run_shell` with a non-string
