@@ -826,6 +826,13 @@ for V1; server-side cursor replay is documented as the V2 path.
     port — fixed by using `sw.port` directly. `InteractiveApprover`
     also now writes to the leader's per-message stream so the
     leader's tool calls work even if the SharedWorker fails.
+  - **Second post-fix** (next commit): the worker's
+    `parseSSEFrame` ignored the `event:` line — the server strips
+    `type` from the JSON body and puts it only on the SSE event
+    line, so the worker was returning events with no `type` field
+    and the reducer's switch was falling through. Fix: import the
+    UI's proper `drainFrames` + `parseSSEFrame` from
+    `api/sse-parse.js`.
   - **Files**: `packages/ui/src/workers/sync.worker.ts` (new),
     `packages/ui/src/workers/sync-client.ts` (new),
     `packages/ui/src/workers/sync.worker.test.ts` (new, mocked),

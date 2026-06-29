@@ -5,9 +5,9 @@
 // Architecture:
 //   - One SharedWorker instance per origin (browser spawns it on
 //     first import).
-//   - Each tab that imports sync-client.ts opens a MessageChannel
-//     and sends one port to the worker; the worker stashes the
-//     tab's UUID alongside the port.
+//   - Each tab that imports sync-client.ts connects via the
+//     implicit `sw.port`; the worker stashes the tab's UUID
+//     alongside that port.
 //   - The worker opens ONE GET /api/sync SSE and pipes events to
 //     every connected port (so N tabs share 1 SSE connection).
 //   - On (re)connect, the worker emits `{ kind: 'resync' }` so each
@@ -22,6 +22,9 @@
 //   );
 // Vite bundles the worker separately; this file is its entry.
 
+import type { ServerEvent } from "../api/types.js";
+import { drainFrames, parseSSEFrame } from "../api/sse-parse.js";
+
 type WorkerToTab =
   | { kind: "registered"; tabId: string }
   | { kind: "event"; event: ServerEvent }
@@ -30,22 +33,6 @@ type WorkerToTab =
 // Tab-side doesn't write to the worker; reserved for future
 // bidirectional commands.
 type TabToWorker = { kind: "subscribe" };
-
-// ServerEvent shape duplicated here so the worker file is
-// self-contained (no bundling across packages/ui/src boundaries
-// for a single-purpose module). Keep in sync with
-// packages/ui/src/api/types.ts.
-type ServerEvent =
-  | { type: "message_start" }
-  | { type: "token"; delta: string }
-  | { type: "tool_call"; call: { type: "tool_use"; id: string; name: string; input: unknown } }
-  | { type: "approval_required"; requestId: string; tool: { type: "tool_use"; id: string; name: string; input: unknown }; description: string; diff?: string }
-  | { type: "tool_result"; call_id: string; tool: string; approved: boolean; result?: unknown; is_error: boolean; reason?: string }
-  | { type: "message_done"; usage: { input: number; output: number } }
-  | { type: "session_renamed"; sessionId: string; title: string }
-  | { type: "error"; message: string }
-  | { type: "done" }
-  | { type: "message_appended"; sessionId: string; message: { role: string; content: unknown }; originator: string; ts: string };
 
 const ports = new Map<MessagePort, string>();
 let sseController: AbortController | null = null;
@@ -137,31 +124,4 @@ function broadcast(msg: WorkerToTab): void {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
-}
-
-// SSE frame helpers, kept inline to keep the worker file
-// self-contained (no shared util imports).
-function drainFrames(buffer: string): { events: string[]; rest: string } {
-  const parts = buffer.split("\n\n");
-  const rest = parts.pop() ?? "";
-  return { events: parts, rest };
-}
-
-function parseSSEFrame(frame: string): ServerEvent | null {
-  const lines = frame.split("\n");
-  let data: string | null = null;
-  for (const line of lines) {
-    if (line.startsWith("data:")) {
-      const trimmed = line.slice(5).trim();
-      data = data === null ? trimmed : data + trimmed;
-    } else if (line.startsWith("event:")) {
-      void line.slice(6).trim();
-    }
-  }
-  if (data === null || data === "") return null;
-  try {
-    return JSON.parse(data) as ServerEvent;
-  } catch {
-    return null;
-  }
 }
