@@ -1,8 +1,8 @@
 # Phase 18 — Pattern-based command approval per session
 
-**Status:** in-progress (scoping)
+**Status:** done (spec)
 **Started:** 2026-06-28
-**Done:** (not yet)
+**Done:** 2026-06-28 (T18.1 scope; T18.2/T18.3/T18.4 follow)
 
 ## Isolation
 - **Branch:** `main`
@@ -39,3 +39,23 @@ The user's phrasing ("base tool approval") pointed at the
 tool-name-only pattern (today's "Always" button). The follow-up
 sentence ("all future `curl` runs") points at extending that to a
 small DSL so a single approval can whitelist an entire command family.
+
+## Final grammar (as implemented)
+
+The implementation deliberately chose a simpler grammar than the original
+draft. Patterns are strings of one of two shapes:
+
+```
+tool:<name>             matches any call to <name>
+tool:<name> <prefix>    matches calls to <name> whose first
+                        whitespace-delimited token of the input's
+                        `cmd` (or `path`, or `name`, or first string
+                        field) equals <prefix>
+```
+
+Trade-offs vs. a regex-based grammar: no `new RegExp(...)` evaluation,
+no length cap, no field-name validation, no catastrophic-backtracking
+surface; `onAllowlistExtended` lives inside `InteractiveApprover` so
+the `agent` package stays decoupled from `SessionStore`. The UI emits
+patterns in exactly this format; the server parses them eagerly at
+approver construction time and rejects malformed entries.

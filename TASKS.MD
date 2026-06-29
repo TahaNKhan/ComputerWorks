@@ -893,22 +893,22 @@ an allowlist entry, and adds a derived "always allow `curl …`"
 suggestion when the user approves a `run_shell` call with a `cmd`
 string.
 
-- [~] T18.1 — Scope pattern-based approval #phase18 @ready target:phase18
+- [x] T18.1 — Scope pattern-based approval #phase18 @ready target:phase18 _done:2026-06-28
   - **Files**: `docs/specs/phase-18-pattern-approval/{README,requirements,design}.md`
   - **Deps**: none
   - **Done when**:
     - `requirements.md` covers the pattern grammar
-      (`<toolName>` tool-name-only, or
-      `<toolName>:<field>=<regex>(,<field>=<regex>)*`
-      field-restricted), storage in `SessionMeta.allowlist`,
-      audit-log impact, the derived first-token button for
-      `run_shell`, and explicitly notes that wildcard/YOLO-mode
-      is out of scope for this phase
+      (`tool:<name>` tool-only, or `tool:<name> <prefix>`
+      first-token-equals-prefix), storage in
+      `SessionMeta.allowlist`, audit-log impact (`decision:
+      "auto_approve"` + `pattern` field), the derived
+      first-token button for `run_shell`, and explicitly notes
+      that wildcard/YOLO-mode is out of scope for this phase
     - `design.md` names the parser, the matching loop, the
-      `onAllowlistExtended` callback that flows from the agent
-      loop to `SessionStore.patch`, and the cross-tab sync path
-      (`session_meta_updated` via `SyncHub` is enough — no new
-      events)
+      `onAllowlistExtended` callback that fires from the
+      approver to `SessionStore.patch`, and the cross-tab sync
+      path (`session_meta_updated` via `SyncHub` is enough — no
+      new events). No changes to the `agent` package
     - User has signed off on the spec
     - Implementation tasks have been added to TASKS.MD with
       concrete Done when criteria
@@ -918,50 +918,56 @@ string.
     `packages/server/src/interactive-approver.test.ts`,
     `packages/server/src/routes/messages.ts`,
     `packages/server/src/routes/messages.test.ts`,
-    `packages/server/src/session-store.ts`,
-    `packages/server/src/session-store.test.ts`,
-    `packages/agent/src/loop.ts`,
-    `packages/agent/src/loop.test.ts`
+    `packages/server/src/session-store.ts`
   - **Deps**: T18.1
   - **Done when**:
-    - `parsePattern(raw)` returns a `{ toolName, clause }` shape
-      for valid input, `null` for invalid input. Grammar is
-      `<toolName>` or `<toolName>:<field>=<regex>` — no
-      multi-clause AND form (avoids the `,`-inside-regex ambiguity
-      and keeps the parser dead simple). Unit tested with:
-      tool-name-only, single-clause, missing `=`, empty body
-      after `:`, invalid regex source, >256 char regex source,
-      and `parsePattern("*")` returning `null` (wildcard reserved
-      for a later YOLO-mode phase)
-    - `InteractiveApprover.matchesSessionAllowlist` matches the
-      parsed patterns against `call.name` and the input's string
-      field. Tool-name-only patterns match any input.
-      Field-restricted patterns require the field to exist and be
-      a string. Patterns with a different tool name do NOT match.
-      There is no wildcard toolName
-    - The `interactive-approver` constructor parses the
-      `sessionPatterns` list eagerly; a malformed pattern throws
-      at construction time (the route surfaces 500 with a clear
-      message)
-    - `routes/messages.ts` reads `meta.allowlist` and passes it to
-      the approver (today it passes `[]`). Patterns persisted on
-      disk before this commit are still respected
-    - `agent.runTurn` accepts an optional `onAllowlistExtended`
-      callback. When an `approve_for_session` decision lands, the
-      loop fires the callback with `(sessionId, pattern)`. Missing
-      callback is a no-op (no throw)
+    - `parsePattern(input)` returns a `ParsedPattern` shape
+      (`{ kind: "tool", name }` or
+      `{ kind: "tool_prefix", name, prefix }`) for valid input,
+      **throws** for invalid input. Grammar is
+      `tool:<name>` or `tool:<name> <prefix>`. Unit tested
+      with: tool form, prefix form, missing `tool:` prefix,
+      empty name, embedded newlines/tabs, more than one
+      whitespace-separated token after the name, and
+      `formatPattern(parsePattern(x)) === x` round-trip
+    - `isCoveredByAllowlist(allowlist, toolName, input)` matches
+      `tool:<name>` patterns by name equality; matches
+      `tool:<name> <prefix>` patterns by name equality AND
+      `firstToken(pickFirstStringField(input)) === prefix`.
+      Patterns with a different tool name do NOT match. There
+      is no wildcard name. `pickFirstStringField` tries `cmd`,
+      then `path`, then `name`, then any first string-valued
+      key in the input. Malformed entries in the allowlist are
+      silently skipped (defensive)
+    - The `InteractiveApprover` constructor parses the
+      `sessionAllowlist` list eagerly via `parsePattern`; a
+      malformed entry throws at construction time (the route
+      surfaces 500 with a clear message)
+    - `routes/messages.ts` reads `meta.allowlist` and passes it
+      to the approver (today it passes `[]`). Patterns persisted
+      on disk before this commit are still respected — old
+      `allowlist: []` sessions work unchanged
+    - `InteractiveApprover` accepts an `onAllowlistExtended`
+      callback in its `opts`. When an `approve_for_session`
+      decision lands, the approver fires the callback with the
+      raw pattern string **before** resolving the in-flight tool
+      call. Missing callback is a no-op (no throw); a thrown
+      callback is swallowed (the in-flight call still approves)
     - The messages route wires `onAllowlistExtended` to
       `SessionStore.patch({ allowlist: [...current, pattern] })`
       with a duplicate-suppression guard. Patch failures are
       logged + swallowed (the current call still approves)
-    - When the matching pattern is hit, the approver emits
-      `tool_result(approved: true, reason: "matched pattern <pattern>")`
-      before the `tool_call` runs — UI sees the same shape as today
+    - When a session-allowlist pattern covers a call, the
+      approver emits `tool_result(approved: true)` and the
+      route stamps the audit entry with
+      `decision: "auto_approve"` + `pattern: <matched>` and the
+      actual tool name (was `<unknown>` pre-fix)
     - Integration test in `routes/messages.test.ts`: scripted
-      provider + two `run_shell` calls with `curl`. Approve the
-      first with `pattern: "run_shell:cmd=/^curl\\b/"`. The
-      second auto-approves with no prompt; audit log records
-      `decision: "auto_approve"`, `pattern: <matched>`
+      provider + two `run_shell` calls with `echo …`. Approve
+      the first with `pattern: "tool:run_shell echo"`. The
+      second auto-approves with no `approval_required` event;
+      `audit.jsonl` records `decision: "auto_approve"`,
+      `pattern: "tool:run_shell echo"`
     - `bun run typecheck && bun test` is green
 
 - [ ] T18.3 — UI: derived pattern button #phase18 @ready target:phase18
@@ -972,29 +978,31 @@ string.
   - **Deps**: T18.2
   - **Done when**:
     - `firstToken(cmd: string): string | null` helper returns the
-      first whitespace-delimited token from `cmd`, rejecting
-      tokens with shell metacharacters or empty input. Unit
-      tested with: `"curl -s X"` → `"curl"`, `"  ls -la"` →
-      `"ls"`, `"sudo rm -rf /"` → `"sudo"`,
-      `"\"weird quote\""` → `null`, `""` → `null`,
-      `"rm; echo x"` → `null`
+      first whitespace-delimited token from `cmd`. Unit tested
+      with: `"curl -s X"` → `"curl"`, `"  ls -la"` → `"ls"`,
+      `"sudo rm -rf /"` → `"sudo"`, `""` → `null`, `"   "`
+      → `null`, `"git\tstatus"` → `"git"`
+    - A safety check filters tokens that don't match
+      `^[A-Za-z][A-Za-z0-9._-]*$` — these return `null` from the
+      button-derivation helper and the derived button is
+      suppressed. `"rm; echo x"` → `null`
     - When the pending approval is for `run_shell` with a string
       `cmd` whose `firstToken` is non-null, the card renders a
       fourth button labelled `Always allow <token> …` that emits
       `decide({ kind: "approve_for_session", pattern:
-      "run_shell:cmd=/^<escapeRegex(token)>\\b/" })` (note the
-      double backslash — on the wire it's `\b`)
+      "tool:run_shell " + token })`
     - For all other tools (and for `run_shell` with a non-string
-      `cmd`, missing `cmd`, or token that fails the
-      `^[A-Za-z][A-Za-z0-9._-]*$` check), the fourth button is
-      absent — layout is unchanged
-    - The existing "Always" button label changes from `Always` to
-      `Always allow <toolName>` (e.g. `Always allow run_shell`) so
-      the user sees what they're agreeing to. Behaviour unchanged
-    - No "Approve anything" button is rendered. YOLO mode is out of
-      scope for this phase; `decide({ pattern: "*" })` is rejected
-      by the server's `parsePattern` (returns 400) if a buggy
-      client ever sends it
+      `cmd`, missing `cmd`, or token that fails the safety
+      check), the fourth button is absent — layout is unchanged
+    - The existing "Always" button label changes from `Always`
+      to `Always allow <toolName>` (e.g. `Always allow run_shell`)
+      so the user sees what they're agreeing to. The click
+      handler emits
+      `pattern: "tool:" + part.tool.name`. Behaviour unchanged
+    - No "Approve anything" button is rendered. YOLO mode is out
+      of scope for this phase; the server's `parsePattern`
+      silently drops a malformed pattern (the in-flight call
+      still approves)
     - `decideApproval` already accepts the discriminated union;
       no store shape change. `SessionMeta.allowlist` is still
       `string[]` (already typed in `api/types.ts`)

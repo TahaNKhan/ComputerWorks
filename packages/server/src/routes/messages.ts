@@ -28,6 +28,14 @@
 // `message_appended` event it broadcasts. The originating tab
 // dedupes by `originator === tabId` in the reducer; re-connecting
 // tabs dedupe by `message.id`.
+//
+// T18 — Pattern-based per-session approval. The route now:
+//   1. reads `meta.allowlist` from the session and hands the
+//      InteractiveApprover a snapshot at request time
+//   2. provides an `onAllowlistExtended` callback that appends the
+//      new pattern to `meta.allowlist` and persists via store.patch
+//   3. logs `decision: "auto_approve"` + the matching pattern to
+//      the audit log when the session allowlist covers a call
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { z } from "zod";
@@ -35,7 +43,11 @@ import { runTurn, AutoApprover, type Approver, type AgentEvent } from "@computer
 import type {
   Message, Provider, ProviderOverrides, ToolDefinition,
 } from "@computerworks/core";
-import { InteractiveApprover } from "../interactive-approver.js";
+import {
+  InteractiveApprover,
+  isCoveredByAllowlist,
+  parsePattern,
+} from "../interactive-approver.js";
 import { ToolRegistry } from "@computerworks/agent";
 import { SessionRegistry, type SessionRuntime } from "../session-runtime.js";
 import { SessionStore } from "../session-store.js";
@@ -155,6 +167,25 @@ export async function runAgentForSession(
     const toolRegistry = new ToolRegistry();
     for (const t of tools as ToolDefinition[]) toolRegistry.register(t);
 
+    // T18 — compute the matching pattern once per tool_result so
+    // the audit log can record WHY an auto-approved call was
+    // auto-approved. This is duplicated work with the approver
+    // (which also checks the allowlist) but it keeps the approver
+    // ignorant of the audit log.
+    const matchingPattern = (
+      toolName: string,
+      input: Record<string, unknown>,
+    ): string | undefined => {
+      for (const p of meta.allowlist) {
+        try {
+          if (isCoveredByAllowlist([p], toolName, input)) return p;
+        } catch {
+          continue;
+        }
+      }
+      return undefined;
+    };
+
     let eventCount = 0;
     try {
       await runTurn({
@@ -170,13 +201,32 @@ export async function runAgentForSession(
           eventCount++;
           // Persist an audit entry for every tool_result so the
           // on-disk log captures the decision (matches Phase 5).
+          // T18 — also stamp the tool name (was "<unknown>" pre-12.x)
+          // and the session-allowlist pattern when auto-approved.
           if (ev.type === "tool_result") {
+            // T18 — look up the tool name (was "<unknown>" pre-12.x)
+            // and the session-allowlist pattern when auto-approved.
+            const toolName = lookupToolName(history, ev.call_id);
+            const pattern =
+              toolName !== "<unknown>"
+                ? matchingPattern(
+                    toolName,
+                    (lookupToolInput(history, ev.call_id) ??
+                      {}) as Record<string, unknown>,
+                  )
+                : undefined;
             void deps.store.appendAudit(sessionId, {
               ts: new Date().toISOString(),
               sessionId,
               callId: ev.call_id,
-              tool: "<unknown>",
-              decision: ev.approved ? "approve_once" : "reject",
+              tool: toolName,
+              decision:
+                ev.approved && pattern
+                  ? "auto_approve"
+                  : ev.approved
+                    ? "approve_once"
+                    : "reject",
+              ...(pattern ? { pattern } : {}),
               ...(ev.reason ? { reason: ev.reason } : {}),
               isError: ev.is_error,
             });
@@ -239,6 +289,44 @@ export async function runAgentForSession(
   }
 }
 
+/** Find the tool name for a call_id by scanning assistant messages in
+ *  history. Used to enrich audit entries — the agent loop's
+ *  `tool_result` event currently only carries `call_id`, not the tool
+ *  name. Returns "<unknown>" if not found. */
+function lookupToolName(history: Message[], callId: string): string {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i]!;
+    if (m.role !== "assistant") continue;
+    const blocks = Array.isArray(m.content) ? m.content : [];
+    for (const b of blocks) {
+      if (typeof b !== "object" || b === null) continue;
+      const blk = b as { type?: string; id?: string; name?: string };
+      if (blk.type === "tool_use" && blk.id === callId && typeof blk.name === "string") {
+        return blk.name;
+      }
+    }
+  }
+  return "<unknown>";
+}
+
+/** Find the tool input for a call_id by scanning assistant messages.
+ *  Returns null if not found. */
+function lookupToolInput(history: Message[], callId: string): unknown | null {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i]!;
+    if (m.role !== "assistant") continue;
+    const blocks = Array.isArray(m.content) ? m.content : [];
+    for (const b of blocks) {
+      if (typeof b !== "object" || b === null) continue;
+      const blk = b as { type?: string; id?: string; input?: unknown };
+      if (blk.type === "tool_use" && blk.id === callId) {
+        return blk.input ?? {};
+      }
+    }
+  }
+  return null;
+}
+
 function mapAgentEventToServer(ev: AgentEvent): ServerEvent | null {
   switch (ev.type) {
     case "token":
@@ -291,14 +379,63 @@ export async function registerMessagesRoute(
     const originator = typeof tabIdHeader === "string" && tabIdHeader.length > 0
       ? tabIdHeader
       : "anonymous";
+
+    // T18 — the approver needs the session's allowlist at construction
+    // time so it can eagerly parse patterns and (later) auto-approve
+    // matching calls. We also wire `onAllowlistExtended` so an
+    // `approve_for_session` decision persists the new pattern to
+    // meta.allowlist via store.patch. Persistence is best-effort: a
+    // failed patch logs + swallows; the in-flight tool call still
+    // resolves with approve_once semantics.
+    const onAllowlistExtended = (pattern: string): void => {
+      // The approver already threw if the existing allowlist
+      // contained a malformed pattern, but the *new* pattern is
+      // user-supplied. Defensively re-parse.
+      try {
+        parsePattern(pattern);
+      } catch {
+        return;
+      }
+      // De-dupe: if the pattern is already in the allowlist, do
+      // nothing (idempotent). This avoids two patches racing for
+      // the same pattern on a repeated click.
+      if (meta.allowlist.includes(pattern)) return;
+      const next = [...meta.allowlist, pattern];
+      // Fire-and-forget: store.patch writes meta.json atomically.
+      // We don't await — the agent loop doesn't block on this.
+      deps.store
+        .patch(id, { allowlist: next })
+        .catch((err: unknown) => {
+          // Best-effort. Log to stderr so operators can spot it.
+          // The in-flight tool call still resolves with approve_once
+          // semantics; the next turn will see the unchanged allowlist
+          // and prompt again. The user gets a clear "you approved
+          // for session but it didn't stick" experience only if they
+          // look at meta.json, which is acceptable for v1.
+          // eslint-disable-next-line no-console
+          console.error(
+            `[cw] failed to persist session allowlist extension:`,
+            err instanceof Error ? err.message : String(err),
+          );
+        });
+    };
+
     // T17.3 — the approver writes approval_required + tool_result to
     // BOTH the leader's per-message stream AND the SyncHub so the
     // leader's tool calls never depend on the SharedWorker being
     // connected. The reducer's `removeToolCall` is idempotent, so
     // the leader receiving the event twice is harmless.
-    const approver = new InteractiveApprover(writer, deps.syncHub, id, [], [], {
-      timeoutMs: 5 * 60_000,
-    });
+    const approver = new InteractiveApprover(
+      writer,
+      deps.syncHub,
+      id,
+      meta.allowlist,
+      [],
+      {
+        timeoutMs: 5 * 60_000,
+        onAllowlistExtended,
+      },
+    );
     const start = deps.registry.startIfIdle(id, approver, originator);
     if (start.busy) {
       // Race: another request started a turn between our check

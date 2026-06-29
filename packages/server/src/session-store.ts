@@ -30,6 +30,7 @@ import {
 } from "node:fs/promises";
 import { join, resolve, isAbsolute } from "node:path";
 import { homedir } from "node:os";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Message, Role } from "@computerworks/core";
 
@@ -86,6 +87,12 @@ export const AuditEntrySchema = z.object({
     z.literal("denied_by_denylist"),
     z.literal("timeout"),
   ]),
+  /** T18 — the session-allowlist pattern that matched, when
+   *  `decision === "auto_approve"`. Stored as the raw pattern
+   *  string (e.g. `"tool:run_shell curl"`) so an operator can read
+   *  audit.jsonl and see WHY a call was auto-approved without
+   *  reverse-joining anything. */
+  pattern: z.string().optional(),
   reason: z.string().optional(),
   result: z.unknown().optional(),
   isError: z.boolean().optional(),
@@ -146,6 +153,22 @@ export interface SessionStoreOptions {
 
 export class SessionStore {
   private readonly root: string;
+  /** Per-session serialization queue for meta.json writes. Each id
+   *  maps to a tail Promise; the next write hooks on via
+   *  `tail.then(...)` so concurrent calls on the same session run
+   *  one after the other. The on-disk file is the source of truth
+   *  in between, so even a stale in-memory snapshot can't slip in:
+   *  each operation reads meta.json fresh. The queue prevents two
+   *  operations from interleaving their write+rename steps.
+   *
+   *  This exists because of the T18 race surfaced in
+   *  `routes/messages.test.ts`: `onAllowlistExtended`'s
+   *  `store.patch({ allowlist })` and the agent loop's
+   *  `store.patch({})` (via appendMessage) both run for the same
+   *  session in the same tick; without the queue the second patch
+   *  reads the pre-allowlist state and writes it back, clobbering
+   *  the new pattern. */
+  private readonly writeQueues = new Map<string, Promise<unknown>>();
 
   constructor(opts: SessionStoreOptions = {}) {
     this.root = resolveSessionsRoot(opts.root);
@@ -154,6 +177,26 @@ export class SessionStore {
   /** Public read-only view of the root. */
   getRoot(): string {
     return this.root;
+  }
+
+  /** Run `fn` after any other in-flight write on this session has
+   *  finished. Returns `fn`'s result. Used by all meta.json writers
+   *  (create, patch, appendMessage's `updatedAt` bump) so they don't
+   *  read-modify-write against each other. */
+  private enqueueWrite<T>(id: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.writeQueues.get(id) ?? Promise.resolve();
+    const next = prev.then(fn, fn);
+    // Chain a no-op so a rejection doesn't poison the queue; we
+    // surface errors via `next` and keep the tail live for the
+    // following caller.
+    this.writeQueues.set(
+      id,
+      next.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return next;
   }
 
   // ─── create ────────────────────────────────────────────────────────────
@@ -254,6 +297,10 @@ export class SessionStore {
   // ─── patch ────────────────────────────────────────────────────────────
 
   async patch(id: string, patch: SessionPatch): Promise<SessionMeta> {
+    return this.enqueueWrite(id, () => this.patchUnlocked(id, patch));
+  }
+
+  private async patchUnlocked(id: string, patch: SessionPatch): Promise<SessionMeta> {
     // Validate the patch shape first; .strict() will reject unknown keys.
     const validPatch = SessionPatchSchema.parse(patch);
     const current = await this.get(id);
@@ -281,11 +328,17 @@ export class SessionStore {
       ...(current.memoryRoot ? { memoryRoot: current.memoryRoot } : {}),
     };
     const validated = SessionMetaSchema.parse(updated);
-    // Write to tmp + rename to make the patch atomic.
+    // Write to a unique tmp file then rename. Concurrent patches on
+    // the same session (T18's onAllowlistExtended racing the agent
+    // loop's appendMessage, both routing through `patch({})`) used
+    // to clobber each other because both wrote to the same
+    // `.meta.json.tmp` — whichever rename landed last won, regardless
+    // of which patch read the latest current.
     const dir = sessionDir(this.root, id);
-    const tmpMeta = join(dir, ".meta.json.tmp");
+    const tmpMeta = join(dir, `.meta.json.tmp.${randomUUID()}`);
+    const realPath = metaPath(this.root, id);
     await writeFile(tmpMeta, JSON.stringify(validated, null, 2) + "\n", "utf8");
-    await rename(tmpMeta, metaPath(this.root, id));
+    await rename(tmpMeta, realPath);
     return validated;
   }
 
@@ -306,15 +359,13 @@ export class SessionStore {
     const line = JSON.stringify(message) + "\n";
     await appendFile(messagesPath(this.root, id), line, "utf8");
     // Bump updatedAt on the meta so the session sorts to the top of
-    // list(). We do this via a small patch with just updatedAt.
+    // list(). We route through `patch({})` so the meta.json write
+    // uses the same atomic-replace path as everything else. Both
+    // this and a concurrent `onAllowlistExtended` patch are
+    // serialized through `enqueueWrite`, so neither can clobber the
+    // other's allowlist via stale read-modify-write.
     try {
-      const current = await this.get(id);
-      if (!current) return;
-      const next: SessionMeta = { ...current, updatedAt: new Date().toISOString() };
-      const dir = sessionDir(this.root, id);
-      const tmpMeta = join(dir, ".meta.json.tmp");
-      await writeFile(tmpMeta, JSON.stringify(next, null, 2) + "\n", "utf8");
-      await rename(tmpMeta, metaPath(this.root, id));
+      await this.patch(id, {});
     } catch {
       // If meta is missing, the session is corrupt — surface later.
     }
