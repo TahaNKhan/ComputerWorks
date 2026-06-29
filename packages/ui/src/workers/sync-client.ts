@@ -2,16 +2,17 @@
 // T17.3 — Tab-side wrapper around the SharedWorker that owns the
 // central SSE connection.
 //
+// The SharedWorker's implicit `port` (created by the constructor)
+// is the entire channel — both directions. We do NOT use
+// MessageChannel: every previous attempt to transfer a port from
+// the client to the worker resulted in the client listening on the
+// transferred (now-neutered) end, so messages went nowhere.
+//
 // Usage:
 //   const { tabId, onEvent, onResync } = connectSyncWorker();
 //   tabId.then((id) => store.setTabId(id));
 //   const offEvent = onEvent((ev) => applyServerEvent(sessionIdFor(ev), ev));
 //   const offResync = onResync(() => { loadTranscript(activeId); loadSessions(); });
-//
-// Vite bundles `sync.worker.ts` separately via the
-// `new URL(..., import.meta.url)` pattern. Browsers that don't
-// support SharedWorker fall back to a per-tab direct connection
-// via the same `connectSyncWorker` name (kept identical).
 
 import type { ServerEvent } from "../api/types.js";
 
@@ -33,33 +34,25 @@ export interface SyncConnection {
   onResync(cb: () => void): () => void;
 }
 
-// Detect SharedWorker support; if missing, fall back to a
-// per-tab direct connection (no SharedWorker required). This
-// branch is hit only by very old browsers.
-type SyncTransport = "shared-worker" | "direct-sse";
-
-function openTransport(): { port: MessagePort; transport: SyncTransport } {
+function openTransport(): { port: MessagePort } {
   if (typeof SharedWorker !== "undefined") {
+    // Each `new SharedWorker(...)` constructs a NEW SharedWorker
+    // instance UNLESS one with the same `name` already exists for
+    // this origin — browser behavior. All tabs that share an
+    // origin connect to the SAME worker, which is what we want.
     const sw = new SharedWorker(
       new URL("./sync.worker.ts", import.meta.url),
       { type: "module", name: "computerworks-sync" },
     );
     const port = sw.port;
     port.start();
-    return { port, transport: "shared-worker" };
+    return { port };
   }
-  // Fallback: this branch is exercised by `sync-client.test.ts`
-  // (it never connects for real). The fallback path could be
-  // implemented later as direct-EventSource-with-EventEmitter
-  // shim; for V1 we leave it as a stub returning a no-op port.
   throw new Error("SharedWorker not supported in this browser");
 }
 
 export function connectSyncWorker(): SyncConnection {
   const { port } = openTransport();
-  const channel = new MessageChannel();
-  port.postMessage({ kind: "subscribe" }, [channel.port2]);
-  channel.port2.start();
 
   const eventListeners = new Set<(ev: ServerEvent) => void>();
   const resyncListeners = new Set<() => void>();
@@ -73,7 +66,7 @@ export function connectSyncWorker(): SyncConnection {
   let lastResyncSignal = 0;
   const RESYNC_DEBOUNCE_MS = 1000;
 
-  channel.port2.addEventListener("message", (ev: MessageEvent) => {
+  port.addEventListener("message", (ev: MessageEvent) => {
     const msg = ev.data as WorkerToTab | undefined;
     if (!msg) return;
     if (msg.kind === "registered") {
@@ -84,20 +77,23 @@ export function connectSyncWorker(): SyncConnection {
       }
     } else if (msg.kind === "resync") {
       // Debounce: the worker may emit a burst of resync signals
-      // during SSE flap recovery. We coalesce into a single
-      // listener call after a short quiet period.
+      // during SSE flap recovery. Coalesce into a single listener
+      // call after a short quiet period.
       lastResyncSignal = Date.now();
       setTimeout(() => {
-        if (Date.now() - lastResyncSignal < RESYNC_DEBOUNCE_MS) {
-          // a fresher signal reset the timer; do nothing
-          return;
-        }
+        if (Date.now() - lastResyncSignal < RESYNC_DEBOUNCE_MS) return;
         for (const cb of resyncListeners) {
           try { cb(); } catch { /* ignore */ }
         }
       }, RESYNC_DEBOUNCE_MS);
     }
   });
+
+  // Tell the worker we're here. The worker fires `connect` and
+  // sends `{ kind: 'registered', tabId }` back via the same port.
+  // We don't need a separate MessageChannel — `sw.port` is the
+  // single bidirectional channel.
+  port.postMessage({ kind: "subscribe" } satisfies TabToWorker);
 
   return {
     tabId,
@@ -112,7 +108,6 @@ export function connectSyncWorker(): SyncConnection {
   };
 }
 
-// Internal helpers — exposed so tests can construct a port
-// without a real SharedWorker. The test imports a fake `connect`
-// that returns the same shape.
+// Internal helper for tests — exposed only so a fake
+// MessagePort can be injected.
 export const __testing__ = { openTransport };

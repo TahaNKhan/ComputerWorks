@@ -60,13 +60,16 @@ function makeApprover(opts: {
   session?: string[];
   timeoutMs?: number;
 }) {
-  // T17.2 — InteractiveApprover no longer takes a writer; it
-  // broadcasts through SyncHub. Tests still pass a fake writer;
-  // we wrap it in a hub and surface events back to the test via
-  // a small wrapper that re-uses the writer's `events` array.
+  // T17.3 — InteractiveApprover takes BOTH the per-message writer
+  // (for the leader's POST stream) and the SyncHub (for passive
+  // viewers via the central SSE). The writer receives from the
+  // per-message stream only; the hub is for OTHER subscribers (passive
+  // viewers). Tests observe via the writer. We deliberately don't
+  // subscribe the writer to the hub — that would double-count
+  // events. Hub behavior is covered by sync-hub.test.ts.
   const hub = new SyncHub();
-  hub.subscribe(opts.writer);
   const approver = new InteractiveApprover(
+    opts.writer,
     hub,
     "s1",
     opts.session ?? [],

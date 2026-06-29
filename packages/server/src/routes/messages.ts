@@ -291,7 +291,12 @@ export async function registerMessagesRoute(
     const originator = typeof tabIdHeader === "string" && tabIdHeader.length > 0
       ? tabIdHeader
       : "anonymous";
-    const approver = new InteractiveApprover(deps.syncHub, id, [], [], {
+    // T17.3 — the approver writes approval_required + tool_result to
+    // BOTH the leader's per-message stream AND the SyncHub so the
+    // leader's tool calls never depend on the SharedWorker being
+    // connected. The reducer's `removeToolCall` is idempotent, so
+    // the leader receiving the event twice is harmless.
+    const approver = new InteractiveApprover(writer, deps.syncHub, id, [], [], {
       timeoutMs: 5 * 60_000,
     });
     const start = deps.registry.startIfIdle(id, approver, originator);

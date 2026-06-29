@@ -25,6 +25,7 @@ import type {
   ApprovalDecision,
   ApprovalRequest,
 } from "@computerworks/agent";
+import type { SSEWriter } from "./sse-writer.js";
 import type { SyncHub } from "./sync-hub.js";
 import type { ServerEvent } from "./sse.js";
 
@@ -35,6 +36,12 @@ export interface InteractiveApproverOptions {
 
 export class InteractiveApprover implements Approver {
   public readonly sessionId: string;
+  /** T17.3 — the originating tab's per-message SSE writer. We write
+   *  approval_required + tool_result here in addition to the SyncHub
+   *  so the leader's tool calls work even if the SharedWorker
+   *  fails to connect. The reducer's `removeToolCall` is idempotent,
+   *  so the leader receiving the event twice is harmless. */
+  private readonly leaderWriter: SSEWriter;
   private readonly syncHub: SyncHub;
   private readonly sessionAllowlist: readonly string[];
   private readonly globalShellAllowlist: readonly RegExp[];
@@ -44,12 +51,14 @@ export class InteractiveApprover implements Approver {
   private readonly pending = new Map<string, (d: ApprovalDecision) => void>();
 
   constructor(
+    leaderWriter: SSEWriter,
     syncHub: SyncHub,
     sessionId: string,
     sessionAllowlist: readonly string[],
     globalShellAllowlist: readonly RegExp[],
     opts: InteractiveApproverOptions = {},
   ) {
+    this.leaderWriter = leaderWriter;
     this.syncHub = syncHub;
     this.sessionId = sessionId;
     this.sessionAllowlist = sessionAllowlist;
@@ -57,18 +66,28 @@ export class InteractiveApprover implements Approver {
     this.timeoutMs = opts.timeoutMs ?? 5 * 60 * 1000;
   }
 
+  /** Belt-and-suspenders broadcast: write to the leader's
+   *  per-message stream AND the central SSE. The leader gets the
+   *  event once (via the per-message stream). Passive viewers via
+   *  the central SSE. */
+  private broadcast(ev: ServerEvent): void {
+    try {
+      this.leaderWriter.write(ev);
+    } catch {
+      // leader disconnected mid-event; safe to ignore — the
+      // SyncHub broadcast below still reaches passive viewers.
+    }
+    this.syncHub.broadcast(ev);
+  }
+
   /** Called by the agent loop when a tool needs approval. */
   async request(
     req: ApprovalRequest,
     signal: AbortSignal,
   ): Promise<ApprovalDecision> {
-    const broadcast = (ev: ServerEvent): void => {
-      this.syncHub.broadcast(ev);
-    };
-
     // 1. Check global shell allowlist (still logged via tool_result).
     if (req.call.name === "run_shell" && this.matchesGlobalShell(req.call.input)) {
-      broadcast({
+      this.broadcast({
         type: "tool_result",
         call_id: req.call.id,
         approved: true,
@@ -80,7 +99,7 @@ export class InteractiveApprover implements Approver {
 
     // 2. Check session allowlist.
     if (this.matchesSessionAllowlist(req.call)) {
-      broadcast({
+      this.broadcast({
         type: "tool_result",
         call_id: req.call.id,
         approved: true,
@@ -90,7 +109,7 @@ export class InteractiveApprover implements Approver {
       return { kind: "approve_once" };
     }
 
-    // 3. Otherwise, prompt the user via the central SSE.
+    // 3. Otherwise, prompt the user via both channels.
     const requestId = randomUUID();
     return new Promise<ApprovalDecision>((resolve) => {
       // Timeout handler.
@@ -110,7 +129,7 @@ export class InteractiveApprover implements Approver {
         timer = setTimeout(() => {
           signal.removeEventListener("abort", onAbort);
           this.pending.delete(requestId);
-          broadcast({
+          this.broadcast({
             type: "tool_result",
             call_id: req.call.id,
             approved: false,
@@ -127,7 +146,7 @@ export class InteractiveApprover implements Approver {
         signal.removeEventListener("abort", onAbort);
         this.pending.delete(requestId);
         // Emit a tool_result so client UIs can show the decision.
-        broadcast({
+        this.broadcast({
           type: "tool_result",
           call_id: req.call.id,
           approved: decision.kind !== "reject",
@@ -145,7 +164,7 @@ export class InteractiveApprover implements Approver {
         description: req.description,
         ...(req.diff !== undefined ? { diff: req.diff } : {}),
       };
-      broadcast(approvalEvent);
+      this.broadcast(approvalEvent);
     });
   }
 
