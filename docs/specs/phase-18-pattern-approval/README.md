@@ -1,0 +1,41 @@
+# Phase 18 — Pattern-based command approval per session
+
+**Status:** in-progress (scoping)
+**Started:** 2026-06-28
+**Done:** (not yet)
+
+## Isolation
+- **Branch:** `main`
+- **Worktree:** n/a (working on main directly per the project rule)
+
+## Pointers
+- **Tasks:** T18.x IDs in `TASKS.MD`
+  - T18.1 — scope (this doc)
+  - T18.2 — server-side pattern matching + approver wiring
+  - T18.3 — UI derived-pattern suggestion
+  - T18.4 — tests, docs, ship
+- **Spec:**
+  - [requirements.md](requirements.md)
+  - [design.md](design.md)
+- **Related specs:** [[phase-05-server]] (where `InteractiveApprover`
+  and `SessionStore` first landed; this phase finishes the half-built
+  allowlist plumbing), [[phase-07-ui]] (where `ApprovalCard` lives).
+
+## Why isolated (or not)
+Small-to-medium UX feature. No new dependencies, no architectural
+shifts, no wire-format changes. The persistence model
+(`SessionMeta.allowlist: string[]` declared in T5.2) and approver
+interface (`ApprovalDecision["approve_for_session"]` declared in T2.1)
+are already half-built; this phase finishes them end-to-end so that
+clicking "Always" actually adds an allowlist entry, and adds a derived
+"allow all `curl …`" suggestion for `run_shell` calls.
+
+## Brainstorm source
+`next.md:1` — *"tool approval: allow base tool approval per session,
+if a user approves `curl "xyz"` ask if they'd like to allow all
+future `curl` runs using the bash tool."*
+
+The user's phrasing ("base tool approval") pointed at the
+tool-name-only pattern (today's "Always" button). The follow-up
+sentence ("all future `curl` runs") points at extending that to a
+small DSL so a single approval can whitelist an entire command family.

@@ -880,15 +880,154 @@ for V1; server-side cursor replay is documented as the V2 path.
     - `CLAUDE.md` (project) Phase status reflects Phase 17 done
     - `bun run typecheck && bun test` is green
 
-### Phase 18 — MCP support
+### Phase 18 — Pattern-based command approval per session
+**Spec**: [phase-18-pattern-approval](docs/specs/phase-18-pattern-approval/)
+
+The `ApprovalDecision["approve_for_session"]` decision and the
+`SessionMeta.allowlist` field are both declared in v1 but never
+wired together: the messages route passes `[]` as the session
+allowlist, the matching logic only does equality on the tool
+name, and the agent loop ignores the decision's `pattern`. This
+phase finishes the wiring so that clicking "Always" actually adds
+an allowlist entry, and adds a derived "always allow `curl …`"
+suggestion when the user approves a `run_shell` call with a `cmd`
+string.
+
+- [~] T18.1 — Scope pattern-based approval #phase18 @ready target:phase18
+  - **Files**: `docs/specs/phase-18-pattern-approval/{README,requirements,design}.md`
+  - **Deps**: none
+  - **Done when**:
+    - `requirements.md` covers the pattern grammar
+      (`<toolName>` tool-name-only, or
+      `<toolName>:<field>=<regex>(,<field>=<regex>)*`
+      field-restricted), storage in `SessionMeta.allowlist`,
+      audit-log impact, the derived first-token button for
+      `run_shell`, and explicitly notes that wildcard/YOLO-mode
+      is out of scope for this phase
+    - `design.md` names the parser, the matching loop, the
+      `onAllowlistExtended` callback that flows from the agent
+      loop to `SessionStore.patch`, and the cross-tab sync path
+      (`session_meta_updated` via `SyncHub` is enough — no new
+      events)
+    - User has signed off on the spec
+    - Implementation tasks have been added to TASKS.MD with
+      concrete Done when criteria
+
+- [ ] T18.2 — Server: pattern matching + approver wiring #phase18 @ready target:phase18
+  - **Files**: `packages/server/src/interactive-approver.ts`,
+    `packages/server/src/interactive-approver.test.ts`,
+    `packages/server/src/routes/messages.ts`,
+    `packages/server/src/routes/messages.test.ts`,
+    `packages/server/src/session-store.ts`,
+    `packages/server/src/session-store.test.ts`,
+    `packages/agent/src/loop.ts`,
+    `packages/agent/src/loop.test.ts`
+  - **Deps**: T18.1
+  - **Done when**:
+    - `parsePattern(raw)` returns a `{ toolName, clause }` shape
+      for valid input, `null` for invalid input. Grammar is
+      `<toolName>` or `<toolName>:<field>=<regex>` — no
+      multi-clause AND form (avoids the `,`-inside-regex ambiguity
+      and keeps the parser dead simple). Unit tested with:
+      tool-name-only, single-clause, missing `=`, empty body
+      after `:`, invalid regex source, >256 char regex source,
+      and `parsePattern("*")` returning `null` (wildcard reserved
+      for a later YOLO-mode phase)
+    - `InteractiveApprover.matchesSessionAllowlist` matches the
+      parsed patterns against `call.name` and the input's string
+      field. Tool-name-only patterns match any input.
+      Field-restricted patterns require the field to exist and be
+      a string. Patterns with a different tool name do NOT match.
+      There is no wildcard toolName
+    - The `interactive-approver` constructor parses the
+      `sessionPatterns` list eagerly; a malformed pattern throws
+      at construction time (the route surfaces 500 with a clear
+      message)
+    - `routes/messages.ts` reads `meta.allowlist` and passes it to
+      the approver (today it passes `[]`). Patterns persisted on
+      disk before this commit are still respected
+    - `agent.runTurn` accepts an optional `onAllowlistExtended`
+      callback. When an `approve_for_session` decision lands, the
+      loop fires the callback with `(sessionId, pattern)`. Missing
+      callback is a no-op (no throw)
+    - The messages route wires `onAllowlistExtended` to
+      `SessionStore.patch({ allowlist: [...current, pattern] })`
+      with a duplicate-suppression guard. Patch failures are
+      logged + swallowed (the current call still approves)
+    - When the matching pattern is hit, the approver emits
+      `tool_result(approved: true, reason: "matched pattern <pattern>")`
+      before the `tool_call` runs — UI sees the same shape as today
+    - Integration test in `routes/messages.test.ts`: scripted
+      provider + two `run_shell` calls with `curl`. Approve the
+      first with `pattern: "run_shell:cmd=/^curl\\b/"`. The
+      second auto-approves with no prompt; audit log records
+      `decision: "auto_approve"`, `pattern: <matched>`
+    - `bun run typecheck && bun test` is green
+
+- [ ] T18.3 — UI: derived pattern button #phase18 @ready target:phase18
+  - **Files**: `packages/ui/src/components/ApprovalCard.tsx`,
+    `packages/ui/src/components/ApprovalCard.test.tsx` (new),
+    `packages/ui/src/store/sessions.ts`,
+    `packages/ui/src/api/types.ts`
+  - **Deps**: T18.2
+  - **Done when**:
+    - `firstToken(cmd: string): string | null` helper returns the
+      first whitespace-delimited token from `cmd`, rejecting
+      tokens with shell metacharacters or empty input. Unit
+      tested with: `"curl -s X"` → `"curl"`, `"  ls -la"` →
+      `"ls"`, `"sudo rm -rf /"` → `"sudo"`,
+      `"\"weird quote\""` → `null`, `""` → `null`,
+      `"rm; echo x"` → `null`
+    - When the pending approval is for `run_shell` with a string
+      `cmd` whose `firstToken` is non-null, the card renders a
+      fourth button labelled `Always allow <token> …` that emits
+      `decide({ kind: "approve_for_session", pattern:
+      "run_shell:cmd=/^<escapeRegex(token)>\\b/" })` (note the
+      double backslash — on the wire it's `\b`)
+    - For all other tools (and for `run_shell` with a non-string
+      `cmd`, missing `cmd`, or token that fails the
+      `^[A-Za-z][A-Za-z0-9._-]*$` check), the fourth button is
+      absent — layout is unchanged
+    - The existing "Always" button label changes from `Always` to
+      `Always allow <toolName>` (e.g. `Always allow run_shell`) so
+      the user sees what they're agreeing to. Behaviour unchanged
+    - No "Approve anything" button is rendered. YOLO mode is out of
+      scope for this phase; `decide({ pattern: "*" })` is rejected
+      by the server's `parsePattern` (returns 400) if a buggy
+      client ever sends it
+    - `decideApproval` already accepts the discriminated union;
+      no store shape change. `SessionMeta.allowlist` is still
+      `string[]` (already typed in `api/types.ts`)
+    - `bun run typecheck && bun test` is green
+
+- [ ] T18.4 — Docs + smoke + ship #phase18 @ready target:phase18
+  - **Files**: `docs/architecture.md` (only if a node-level
+    diagram change is needed; otherwise skip), `CLAUDE.md`
+    (project), `docs/specs/phase-18-pattern-approval/README.md`
+    (Status: done, Done: <today>)
+  - **Deps**: T18.3
+  - **Done when**:
+    - Manual smoke against a real LLM (or `ScriptedProvider` with
+      two `run_shell` calls): user clicks "Always allow `curl …`";
+      second `curl` call is auto-approved with no card
+    - The audit log distinguishes `auto_approve` (matched pattern)
+      from `approve_once` (manual click); an entry's `pattern`
+      field is set only for the former
+    - `docs/architecture.md` is unchanged if no node-level
+      topology change was needed (the allowlist sits inside
+      `SessionMeta` and is already in the diagram)
+    - `CLAUDE.md` "Phase status" reflects Phase 18 done
+    - `bun run typecheck && bun test` is green
+
+### Phase 19 — MCP support
 The `Tool` interface is already provider-agnostic ([[phase-03-tools|
 Phase 3]]) so the server can consume tools from MCP-compatible
 servers without changing the agent loop. The remaining work is
 discovery + transport (stdio for local MCP servers, HTTP+SSE for
 remote ones).
 
-- [ ] T18.1 — Scope MCP support #phase18 @ready target:phase18
-  - **Files**: `docs/specs/phase-18-mcp/{README,requirements,design}.md`,
+- [ ] T19.1 — Scope MCP support #phase19 @ready target:phase19
+  - **Files**: `docs/specs/phase-19-mcp/{README,requirements,design}.md`,
     `packages/mcp-client/` (new), `packages/server/src/tools/index.ts`
   - **Deps**: none
   - **Done when**:
@@ -905,14 +1044,14 @@ remote ones).
     - Implementation tasks have been added to TASKS.MD with
       concrete Done when criteria
 
-### Phase 19 — Skills support
+### Phase 20 — Skills support
 Skills are pre-defined bundles of (prompt prefix + tool
 allowlist + optional setup script) the user can invoke by name.
 Built-ins live in the codebase; user-defined ones live in
 `~/.computerworks/skills/<name>/`.
 
-- [ ] T19.1 — Scope skills support #phase19 @ready target:phase19
-  - **Files**: `docs/specs/phase-19-skills/{README,requirements,design}.md`,
+- [ ] T20.1 — Scope skills support #phase20 @ready target:phase20
+  - **Files**: `docs/specs/phase-20-skills/{README,requirements,design}.md`,
     `packages/skills/` (new), `packages/server/src/system-prompt.ts`,
     `packages/ui/src/components/SkillsPalette.tsx` (new)
   - **Deps**: none
