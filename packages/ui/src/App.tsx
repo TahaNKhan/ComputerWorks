@@ -69,19 +69,26 @@ export function App(): JSX.Element {
     let unsubResync: (() => void) | null = null;
     try {
       const conn = connectSyncWorker();
-      void conn.tabId.then((id) => setTabId(id));
+      void conn.tabId.then((id) => {
+        // eslint-disable-next-line no-console
+        console.log("[App] initSync assigned tabId:", id);
+        setTabId(id);
+      });
       unsubEvent = conn.onEvent((ev) => {
         const sid = eventSessionId(ev, activeSessionId);
+        // eslint-disable-next-line no-console
+        console.log("[App] applyServerEvent:", ev.type, "sessionId:", sid);
         if (sid) applyServerEvent(sid, ev);
       });
       unsubResync = conn.onResync(() => {
+        // eslint-disable-next-line no-console
+        console.log("[App] resync received — refreshing state");
         if (activeSessionId) void loadTranscript(activeSessionId);
         void loadSessions();
       });
-    } catch {
-      // SharedWorker unavailable; the per-tab POST stream still
-      // works for the leader tab. Other tabs on this origin fall
-      // back to per-tab polling (TBD).
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("[App] initSync failed (SharedWorker unavailable?):", err);
     }
     return () => {
       unsubEvent?.();
