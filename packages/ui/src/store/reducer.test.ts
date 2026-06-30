@@ -17,8 +17,9 @@ import {
   messagesOf,
   reduceStreamEvent,
   removeToolCall,
+  transcriptToUi,
 } from "./reducer.js";
-import type { ServerEvent, UiMessage } from "../api/types.js";
+import type { ServerEvent, SessionMessage, UiMessage } from "../api/types.js";
 
 function stateWith(active: string | null = null, messages: UiMessage[] = []) {
   const s = initialState();
@@ -313,6 +314,41 @@ describe("reduceStreamEvent — message_appended (T17.3)", () => {
     expect(messagesOf(next, "s1")).toBe(before);
   });
 
+  it("T19 — drops tool-result messages (no tool_output as raw text in chat)", () => {
+    const s = stateWith("s1", []);
+    const next = reduceStreamEvent(s, "s1", {
+      type: "message_appended",
+      sessionId: "s1",
+      message: {
+        role: "tool",
+        content: [{
+          type: "tool_result",
+          tool_use_id: "c1",
+          content: '{"stdout":"hi"}',
+          is_error: false,
+        }],
+      },
+      originator: "tab-other",
+      ts: "2026-06-28T12:00:00.000Z",
+    });
+    expect(messagesOf(next, "s1")).toHaveLength(0);
+  });
+
+  it("T19 — drops assistant messages whose only content is a tool_use block", () => {
+    const s = stateWith("s1", []);
+    const next = reduceStreamEvent(s, "s1", {
+      type: "message_appended",
+      sessionId: "s1",
+      message: {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "c1", name: "list_dir", input: {} }],
+      },
+      originator: "tab-other",
+      ts: "2026-06-28T12:00:00.000Z",
+    });
+    expect(messagesOf(next, "s1")).toHaveLength(0);
+  });
+
   it("dedupes by ts key (server-stable timestamp)", () => {
     const ts = "2026-06-28T12:00:00.000Z";
     const baseEvent = {
@@ -420,5 +456,97 @@ describe("reduceStreamEvent — pure-function invariants", () => {
     const snapshot = JSON.stringify(s);
     reduceStreamEvent(s, "s1", { type: "token", delta: "y" });
     expect(JSON.stringify(s)).toBe(snapshot);
+  });
+});
+
+// ─── transcriptToUi (T19 — filter tool calls / results from persisted transcript) ─
+
+describe("transcriptToUi", () => {
+  it("keeps user text and assistant text", () => {
+    const out = transcriptToUi([
+      { role: "user", content: "hi" },
+      { role: "assistant", content: [{ type: "text", text: "hello" }] },
+    ]);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toMatchObject({ role: "user", parts: [{ kind: "text", text: "hi" }] });
+    expect(out[1]).toMatchObject({ role: "assistant", parts: [{ kind: "text", text: "hello" }] });
+  });
+
+  it("keeps only the text part when an assistant message has text + tool_use", () => {
+    const out = transcriptToUi([{
+      role: "assistant",
+      content: [
+        { type: "text", text: "I'll show you — note the file is ~16 KB." },
+        { type: "tool_use", id: "c1", name: "read_file", input: { path: "REQUIREMENTS.MD" } },
+      ],
+    }]);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.parts).toEqual([{ kind: "text", text: "I'll show you — note the file is ~16 KB." }]);
+  });
+
+  it("drops assistant messages whose only content is a tool_use block", () => {
+    const out = transcriptToUi([{
+      role: "assistant",
+      content: [{ type: "tool_use", id: "c1", name: "list_dir", input: {} }],
+    }]);
+    expect(out).toHaveLength(0);
+  });
+
+  it("drops tool_result messages (no raw JSON in chat)", () => {
+    const out = transcriptToUi([{
+      role: "tool",
+      content: [{
+        type: "tool_result",
+        tool_use_id: "c1",
+        content: '[{"name":"package.json","type":"file","size":973}]',
+        is_error: false,
+      }],
+    }]);
+    expect(out).toHaveLength(0);
+  });
+
+  it("drops system messages", () => {
+    const out = transcriptToUi([
+      { role: "system", content: "you are a helpful assistant" },
+    ]);
+    expect(out).toHaveLength(0);
+  });
+
+  it("matches the user's transcript (the one that triggered this fix)", () => {
+    // Reproduces the shape from the bug report: a turn where the
+    // assistant issues a tool_use, gets a tool_result back, then
+    // summarizes. None of the tool bookkeeping should appear in
+    // the chat; only the user prompts and the assistant narrative.
+    const transcript: SessionMessage[] = [
+      { role: "user", content: "list the files in your working dir" },
+      { role: "assistant", content: [{ type: "tool_use", id: "c1", name: "list_dir", input: {} }] },
+      { role: "tool", content: [{ type: "tool_result", tool_use_id: "c1", content: "[]", is_error: false }] },
+      { role: "assistant", content: [{ type: "text", text: "Here's what's there…" }] },
+      { role: "user", content: "cat it" },
+      { role: "assistant", content: [
+        { type: "text", text: "Sure, give me a sec." },
+        { type: "tool_use", id: "c2", name: "run_shell", input: { command: "cat" } },
+      ] },
+      { role: "tool", content: [{ type: "tool_result", tool_use_id: "c2", content: '{"stdout":"…"}', is_error: false }] },
+      { role: "assistant", content: [{ type: "text", text: "Done — that's the file." }] },
+    ];
+    const out = transcriptToUi(transcript);
+    expect(out.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant", "assistant"]);
+    expect(out.map((m) => m.parts[0])).toEqual([
+      { kind: "text", text: "list the files in your working dir" },
+      { kind: "text", text: "Here's what's there…" },
+      { kind: "text", text: "cat it" },
+      { kind: "text", text: "Sure, give me a sec." },
+      { kind: "text", text: "Done — that's the file." },
+    ]);
+  });
+
+  it("handles an empty transcript", () => {
+    expect(transcriptToUi([])).toEqual([]);
+  });
+
+  it("handles an assistant message whose content is a single text block with empty text", () => {
+    const out = transcriptToUi([{ role: "assistant", content: [{ type: "text", text: "" }] }]);
+    expect(out).toEqual([]);
   });
 });

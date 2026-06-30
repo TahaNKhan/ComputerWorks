@@ -34,6 +34,7 @@ import {
   makeId,
   messagesOf,
   reduceStreamEvent,
+  transcriptToUi,
   type PendingApproval,
   type SessionsState,
 } from "./reducer.js";
@@ -174,46 +175,13 @@ export const useSessionsStore = create<SessionsStore>((set, get) => ({
   loadTranscript: async (id) => {
     try {
       const res = await apiGetSession(id);
-      const msgs: UiMessage[] = res.messages.map((m) => {
-        if (m.role === "user") {
-          const text =
-            typeof m.content === "string"
-              ? m.content
-              : (m.content.find((b) => b.type === "text")?.text ?? "");
-          return {
-            id: makeId("u"),
-            role: "user",
-            parts: [{ kind: "text", text }],
-          };
-        }
-        if (m.role === "assistant") {
-          const text =
-            typeof m.content === "string"
-              ? m.content
-              : (m.content.find((b) => b.type === "text")?.text ?? "");
-          return {
-            id: makeId("a"),
-            role: "assistant",
-            parts: text ? [{ kind: "text", text }] : [],
-          };
-        }
-        if (m.role === "tool") {
-          const text =
-            typeof m.content === "string"
-              ? m.content
-              : (m.content.find((b) => b.type === "tool_result")?.content ?? "");
-          return {
-            id: makeId("t"),
-            role: "assistant",
-            parts: [{ kind: "text", text }],
-          };
-        }
-        return {
-          id: makeId("s"),
-          role: "assistant",
-          parts: [],
-        };
-      });
+      // T19 — transcriptToUi drops tool/system messages and
+      // assistant messages whose only content is a tool_use
+      // block. Tool calls and their results were already
+      // surfaced during the live turn; the persisted transcript
+      // is for the user's narrative, not the model's tool
+      // bookkeeping.
+      const msgs = transcriptToUi(res.messages);
       set((s) => ({
         ...setMessages(s, id, msgs),
         ...setAudit(s, id, res.audit),

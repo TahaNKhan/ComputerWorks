@@ -16,6 +16,7 @@ import type {
   AuditEntry,
   MessagePart,
   ServerEvent,
+  SessionMessage,
   SessionMeta,
   UiMessage,
 } from "../api/types.js";
@@ -60,23 +61,67 @@ export function makeId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-// T17.3 — convert a server-side message to a UiMessage. The
-// `id` is a client-generated prefix + the server's ts (which is
-// stable across subscribers); `_cw_ts` carries the bare ts for
-// idempotent dedupe in the reducer.
-function serverMessageToUi(message: { role: string; content: unknown }, ts: string): UiMessage {
-  const role: "user" | "assistant" = message.role === "user" ? "user" : "assistant";
-  const text =
-    typeof message.content === "string"
-      ? message.content
-      : Array.isArray(message.content)
-        ? (message.content.find((b: { type?: string }) => b.type === "text") as { text?: string } | undefined)?.text ?? ""
-        : "";
-  return {
-    id: `m-${ts}`,
-    role,
-    parts: text ? [{ kind: "text", text }] : [],
-  };
+// T17.3 — convert a single server-side message to a UiMessage.
+// The `id` is a client-generated prefix + the server's ts (which
+// is stable across subscribers); `_cw_ts` carries the bare ts
+// for idempotent dedupe in the reducer.
+//
+// Returns `null` for messages that should never be rendered in
+// the chat:
+//   - `role: "tool"` / `role: "system"` — tool outputs and
+//     system prompts aren't user-visible narrative.
+//   - assistant messages whose only content is a `tool_use`
+//     block — they represent the model invoking a tool with
+//     no text; the tool's outcome arrives in a separate
+//     message.
+//
+// For assistant messages with mixed `text` + `tool_use` content,
+// only the `text` blocks are kept; `tool_use` blocks are
+// dropped. This matches the live-streaming behavior, where
+// `tool_result` events cause `removeToolCall` to drop the
+// tool_call block from the chat.
+function serverMessageToUi(message: SessionMessage, ts: string): UiMessage | null {
+  if (message.role === "user") {
+    const text = typeof message.content === "string" ? message.content : "";
+    if (!text) return null;
+    return {
+      id: `m-${ts}`,
+      role: "user",
+      parts: [{ kind: "text", text }],
+    };
+  }
+  if (message.role === "assistant") {
+    const blocks = Array.isArray(message.content) ? message.content : [];
+    const text = blocks
+      .filter((b): b is { type: "text"; text: string } => b.type === "text" && typeof b.text === "string")
+      .map((b) => b.text)
+      .join("");
+    if (!text) return null;
+    return {
+      id: `m-${ts}`,
+      role: "assistant",
+      parts: [{ kind: "text", text }],
+    };
+  }
+  return null;
+}
+
+/** Convert a server-side transcript (e.g. from GET /api/sessions/:id)
+ *  to a list of UI messages, dropping tool/system/tool_use-only
+ *  messages. Used by `loadTranscript` (refresh + session switch)
+ *  and is the same shape the `message_appended` reducer path
+ *  produces for a single message. */
+export function transcriptToUi(messages: SessionMessage[]): UiMessage[] {
+  const out: UiMessage[] = [];
+  for (const m of messages) {
+    // Pin the id to the message's position in the transcript so a
+    // subsequent `message_appended` for one of these messages is
+    // deduped via the reducer's `_cw_ts` check (the reducer tags
+    // each fresh message with `_cw_ts = "<sessionId>:<ts>"`).
+    const fresh = serverMessageToUi(m, `tx-${out.length}`);
+    if (fresh) out.push(fresh);
+  }
+  return out;
 }
 
 // ─── Helpers (exported for unit testing) ──────────────────────────────────
@@ -276,6 +321,12 @@ export function reduceStreamEvent(
       // so we skip. Re-connect dedupe uses the server's `ts` (a
       // per-message stable timestamp) — `id` is client-generated
       // and doesn't survive re-mount, but `ts` does.
+      //
+      // T19 — `serverMessageToUi` returns `null` for tool/system
+      // messages and assistant messages with no text. The chat
+      // doesn't render those, so we drop them on the floor here
+      // too (the live broadcast from the server carries the full
+      // transcript, including tool result messages).
       if (ev.originator === state.tabId) return state;
       const sessionMessages = messagesOf(state, ev.sessionId);
       const tsKey = `${ev.sessionId}:${ev.ts}`;
@@ -284,6 +335,10 @@ export function reduceStreamEvent(
         break;
       }
       const fresh = serverMessageToUi(ev.message, ev.ts);
+      if (!fresh) {
+        nextMsgs = sessionMessages;
+        break;
+      }
       (fresh as UiMessage & { _cw_ts?: string })._cw_ts = tsKey;
       nextMsgs = [...sessionMessages, fresh];
       break;
