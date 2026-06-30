@@ -1305,7 +1305,7 @@ model emits on turn 1.
       `key` is `"0"`
     - `bun run typecheck && bun test` is green
 
-- [ ] T19.9 — CSS: `@keyframes cw-row-title-in` #phase19 @ready target:phase19
+- [x] T19.9 — CSS: `@keyframes cw-row-title-in` #phase19 @ready target:phase19 _done:2026-06-29
   - **Files**: `packages/ui/src/styles/global.css`
   - **Deps**: T19.8
   - **Done when**:

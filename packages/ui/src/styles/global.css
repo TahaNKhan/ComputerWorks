@@ -285,6 +285,27 @@ input, textarea {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* T19.9 — sidebar title slide-in animation. The SessionList
+   * Row bumps a key on the <span class="cw-row-title"> whenever
+   * an SSE-driven rename_session lands (titleSource === "auto"),
+   * which retriggers this keyframe via React's key prop. Cold
+   * start and manual renames don't bump the key, so the
+   * animation only fires on tool-driven renames. The translateX
+   * -8px → 0 + opacity 0 → 1 keeps it subtle enough not to
+   * disrupt reading; a `prefers-reduced-motion` gate is a
+   * trivial follow-up. */
+  animation: cw-row-title-in 280ms ease-out;
+}
+
+@keyframes cw-row-title-in {
+  from {
+    transform: translateX(-8px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
 
 .cw-row-actions {
