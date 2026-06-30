@@ -1033,30 +1033,311 @@ string.
     - `CLAUDE.md` "Phase status" reflects Phase 18 done
     - `bun run typecheck && bun test` is green
 
-### Phase 19 — MCP support
-The `Tool` interface is already provider-agnostic ([[phase-03-tools|
-Phase 3]]) so the server can consume tools from MCP-compatible
-servers without changing the agent loop. The remaining work is
-discovery + transport (stdio for local MCP servers, HTTP+SSE for
-remote ones).
+### Phase 19 — LLM-driven session retitling
+**Spec**: [phase-19-auto-retitle](docs/specs/phase-19-auto-retitle/)
 
-- [ ] T19.1 — Scope MCP support #phase19 @ready target:phase19
-  - **Files**: `docs/specs/phase-19-mcp/{README,requirements,design}.md`,
-    `packages/mcp-client/` (new), `packages/server/src/tools/index.ts`
+T12.2 generates a session title once from the first turn and
+then freezes it. By the third or fourth message the title is no
+longer representative of the conversation; the user has no way
+to fix that without manually renaming. The model already has the
+full conversation in its context — it can decide better than a
+counter when to rename, and a single tool call is cheaper than
+a background LLM call.
+
+This phase replaces T12.2 entirely (one code path, not two):
+
+- The model decides when to rename by calling a new auto-
+  approved `rename_session({ title })` tool during any turn.
+- The server enforces a server-side rate limit (default min 3
+  user messages between renames) so a pathological model can't
+  rename every turn.
+- The server respects manual renames via
+  `SessionMeta.titleSource: "auto" | "manual"`. A user-set
+  title is permanent (until the user resets via `title: ""`).
+- The sidebar slide-in animation makes the rename visible
+  without a hard cut.
+- `createSession({ title })` and `PATCH /api/sessions/:id` with
+  `{ title }` still work and set `titleSource: "manual"`.
+- `COMPUTERWORKS_TITLE_LLM_DECIDES=false` (default `true`)
+  removes the system-prompt instruction so the model never
+  learns about the tool — full disable.
+
+The T12.2 first-turn generator is **deleted** — no
+`title-generator.ts`, no `void generateTitle(...)` call in
+`routes/messages.ts`. The first-turn title becomes whatever the
+model emits on turn 1.
+
+- [ ] T19.1 — Scope LLM-driven retitling #phase19 @ready target:phase19
+  - **Files**: `docs/specs/phase-19-auto-retitle/{README,requirements,design}.md`
   - **Deps**: none
   - **Done when**:
-    - `requirements.md` answers: which MCP transports are
-      supported (stdio, HTTP+SSE), how servers are configured
-      (`~/.computerworks/config.ts` vs runtime discovery), how the
-      approval model extends to MCP tools, how tool descriptions
-      flow back to the model, and what happens when an MCP server
-      goes down mid-turn
-    - `design.md` names the transport adapter, the registration
-      flow, the merge with the default tool set, and the failure
-      modes
+    - `requirements.md` covers the `rename_session` tool
+      (input schema, output shape, rejection reasons), the
+      server-side rate limit (default min 3, env-overridable,
+      first-rename always allowed), the `titleSource` field for
+      respecting manual renames, the `lastRenamedAtMessageCount`
+      field, the system-prompt "Session title" section, the
+      `COMPUTERWORKS_TITLE_LLM_DECIDES` disable flag, the
+      `session_renamed` SSE event with optional `titleSource`,
+      and the sidebar slide-in animation
+    - `design.md` names the tool's `execute` flow (sanitize →
+      check `titleSource` → check rate limit → patch meta →
+      broadcast), the `SessionMeta` schema additions, the PATCH/
+      POST `titleSource` stamping, the system-prompt gating, the
+      deletion of `title-generator.ts` and the route hook, the
+      `Row` animation gating, and confirms the agent + core
+      packages are untouched
     - User has signed off on the spec
     - Implementation tasks have been added to TASKS.MD with
       concrete Done when criteria
+
+- [ ] T19.2 — Server: `rename_session` tool + `sanitizeTitle` move #phase19 @ready target:phase19
+  - **Files**: `packages/server/src/tools/rename-session.ts` (new),
+    `packages/server/src/tools/rename-session.test.ts` (new),
+    `packages/server/src/tools/index.ts`,
+    `packages/server/src/title-generator.ts` (DELETED),
+    `packages/server/src/title-generator.test.ts` (DELETED, if it exists)
+  - **Deps**: T19.1
+  - **Done when**:
+    - `packages/server/src/tools/rename-session.ts` defines:
+      - `renameSessionInputSchema = z.object({ title: z.string().min(1).max(200) })`
+      - `createRenameSessionTool({ store, syncHub, minMessagesBetweenRenames })`
+        returning a `ToolDefinition` with
+        `name: "rename_session"`, `description: "Update the
+        session title visible in the sidebar..."`,
+        `requiresApproval: false`
+      - `sanitizeTitle(raw)` — moved verbatim from
+        `title-generator.ts` (same T12.2 logic + tests)
+      - `runRename(opts, input, ctx)` — the `execute`
+        implementation: load `meta`, reject
+        `manual_rename_locked` if `titleSource === "manual"`,
+        count user messages in the persisted transcript, reject
+        `rate_limited` if `userCount - (last ?? -min) < min`
+        (the first rename, when `last === undefined`, is always
+        allowed), sanitize, reject `empty_after_sanitize`, patch
+        meta with `{ title, titleSource: "auto",
+        lastRenamedAtMessageCount: userCount }`, broadcast
+        `session_renamed` with `titleSource: "auto"`, return
+        `{ ok: true, title }` (or `{ ok: false, reason }`)
+    - `packages/server/src/tools/index.ts` `defaultTools`
+      signature gains `{ store: SessionStore, syncHub: SyncHub,
+      minMessagesBetweenRenames: number }` and includes the new
+      tool. Existing tests updated for the new signature
+    - `packages/server/src/title-generator.ts` and its test file
+      are DELETED (no leftover references — verified by `grep
+      -r "title-generator" packages/`)
+    - Unit tests in `rename-session.test.ts`:
+      - Happy path (first rename on turn 1, patch + broadcast)
+      - Rate limit (`last = 1`, `userCount = 3`, `min = 3` →
+        reject)
+      - Rate limit boundary (`last = 1`, `userCount = 4`, `min
+        = 3` → allow; `lastRenamedAtMessageCount` updated to 4)
+      - Rate limit (first rename: `last === undefined`, allow
+        even at `userCount = 1`)
+      - Manual-rename lock (`titleSource: "manual"` → reject,
+        no patch, no broadcast)
+      - Empty after sanitize (`title: "   !!!   "` → reject)
+      - Quoted title (`title: '"K8s migration"'` → unquoted,
+        succeed)
+      - Long title (500-char input → truncated to ≤80 chars at a
+        word boundary, succeed)
+      - Session not found (`store.get` returns `null` → reject)
+    - `bun run typecheck && bun test` is green
+
+- [ ] T19.3 — Server: `SessionMeta.titleSource` + `lastRenamedAtMessageCount` + PATCH stamps #phase19 @ready target:phase19
+  - **Files**: `packages/server/src/session-store.ts`,
+    `packages/server/src/session-store.test.ts`,
+    `packages/server/src/routes/sessions.ts`,
+    `packages/server/src/routes/sessions.test.ts`
+  - **Deps**: T19.1
+  - **Done when**:
+    - `SessionMetaSchema` gains
+      `titleSource: z.enum(["auto", "manual"]).default("auto")`
+      and
+      `lastRenamedAtMessageCount: z.number().int().min(0).optional()`.
+      Forward-compatible — old `meta.json` files without these
+      fields default to `"auto"` and `undefined`
+    - `SessionPatchSchema` gains matching optional fields:
+      `titleSource`, `lastRenamedAtMessageCount`
+    - `SessionStore.patchUnlocked` merges the new fields
+      alongside `title` and `allowlist` (preserves the existing
+      `enqueueWrite` race-safety from T18)
+    - `PATCH /api/sessions/:id` with `{ title: "X" }` (and no
+      `titleSource`) stamps `titleSource: "manual"` and returns
+      the patched meta. With `{ title: "" }` stamps
+      `titleSource: "auto"`
+    - `PATCH /api/sessions/:id` with explicit
+      `{ titleSource: "auto" }` honors the explicit value
+      (escape hatch for resetting a manual rename)
+    - `POST /api/sessions` with `{ title: "X" }` creates the meta
+      with `titleSource: "manual"`
+    - Round-trip tests: parse meta without the new fields
+      defaults; patch sets them; explicit patch wins
+    - `bun run typecheck && bun test` is green
+
+- [ ] T19.4 — Server: drop T12.2 (delete `title-generator.ts`) #phase19 @ready target:phase19
+  - **Files**: `packages/server/src/routes/messages.ts`
+  - **Deps**: T19.2
+  - **Done when**:
+    - `routes/messages.ts` no longer imports `generateTitle`
+      from `title-generator.ts` (the import line is removed)
+    - The `void generateTitle({...}, sessionId)` call at the end
+      of `runAgentForSession` (the T12.2 first-turn generator)
+      is deleted
+    - `routes/messages.test.ts` (and any other test) does not
+      reference `generateTitle` — verified by `grep -r
+      "generateTitle" packages/`
+    - The integration test for "first-turn title" is updated:
+      with the new design, the title comes from the model
+      calling `rename_session`, not from a background LLM call.
+      Tests assert the new behavior via a scripted provider that
+      calls `rename_session` on turn 1
+    - `bun run typecheck && bun test` is green
+
+- [ ] T19.5 — Server: config section + env overrides #phase19 @ready target:phase19
+  - **Files**: `packages/server/src/config.ts`,
+    `packages/server/src/config.test.ts`
+  - **Deps**: T19.1
+  - **Done when**:
+    - `ConfigSchema.title` is added:
+      `title: z.object({ llmDecides: z.boolean().default(true), minMessagesBetweenRenames: z.number().int().min(0).default(3) }).default({})`
+    - `applyEnvOverrides` honors
+      `COMPUTERWORKS_TITLE_LLM_DECIDES` (`true` / `false` /
+      `1` / `0` — anything else falls back to schema default
+      `true`) and
+      `COMPUTERWORKS_TITLE_MIN_MESSAGES_BETWEEN_RENAMES`
+      (non-negative int; invalid falls back to default `3`).
+      Setting it to `0` disables the rate limit (model can
+      rename every turn after the first)
+    - Config tests: defaults apply with no file and no env;
+      file overrides; env wins over file; invalid env falls
+      back to schema default; `0` is accepted as a valid value
+      for the messages-between-renames override
+    - `bun run typecheck && bun test` is green
+
+- [ ] T19.6 — Server: system-prompt "Session title" section #phase19 @ready target:phase19
+  - **Files**: `packages/server/src/system-prompt.ts`,
+    `packages/server/src/system-prompt.test.ts` (new or
+    extended)
+  - **Deps**: T19.5
+  - **Done when**:
+    - `buildSystemPrompt` accepts `llmDecides: boolean` in its
+      options (default `true`)
+    - When `llmDecides === true`, the rendered prompt contains
+      a new section starting with `## Session title` that
+      describes when to call `rename_session`, when NOT to call
+      it, and what the rejection reasons mean
+    - When `llmDecides === false`, the rendered prompt does NOT
+      contain the `## Session title` section (verified by string
+      assertion in the test)
+    - The `## Session title` section tells the model: call when
+      the topic genuinely shifts (not every turn), don't call
+      if the user manually renamed (server rejects with
+      `manual_rename_locked`), don't call for trivial exchanges,
+      and the server rate-limits at
+      `minMessagesBetweenRenames` so over-eager renames will be
+      rejected with `rate_limited`
+    - `routes/messages.ts` passes
+      `llmDecides: config.title.llmDecides` to
+      `buildSystemPrompt(...)`
+    - Test pins both branches (`true` includes, `false`
+      excludes)
+    - `bun run typecheck && bun test` is green
+
+- [ ] T19.7 — Server: `session_renamed` SSE event with `titleSource` + integration test #phase19 @ready target:phase19
+  - **Files**: `packages/server/src/sse.ts`,
+    `packages/server/src/routes/messages.test.ts`
+  - **Deps**: T19.2, T19.3, T19.4, T19.6
+  - **Done when**:
+    - `ServerEvent.session_renamed` in `sse.ts` gains an optional
+      `titleSource: "auto" | "manual"` field. Forward-compatible
+      — old clients that ignore the missing field still work
+    - Integration test in `routes/messages.test.ts`:
+      - Scripted provider that calls
+        `rename_session({ title: "X" })` on turn 1. After the
+        turn, assert `meta.title === "X"`,
+        `meta.titleSource === "auto"`,
+        `meta.lastRenamedAtMessageCount === 1`. The
+        `session_renamed` SSE event carries `titleSource:
+        "auto"`
+      - Scripted provider that calls `rename_session` twice
+        with `minMessagesBetweenRenames: 3` — the second call
+        returns `{ ok: false, reason: "rate_limited" }` as a
+        `tool_result` message. `meta.lastRenamedAtMessageCount`
+        stays at 1 (not bumped on rejection)
+      - PATCH `{title:"X"}` between scripted turns; the next
+        scripted turn's `rename_session` call returns
+        `{ ok: false, reason: "manual_rename_locked" }`
+      - With `llmDecides: false`, the rendered system prompt
+        doesn't contain the `## Session title` section (cross-
+        check with T19.6's system-prompt test)
+    - `bun run typecheck && bun test` is green
+
+- [ ] T19.8 — UI: `SessionMeta.titleSource` + reducer + animation #phase19 @ready target:phase19
+  - **Files**: `packages/ui/src/api/types.ts`,
+    `packages/ui/src/store/reducer.ts`,
+    `packages/ui/src/store/reducer.test.ts`,
+    `packages/ui/src/components/SessionList.tsx`,
+    `packages/ui/src/components/SessionList.test.tsx` (new)
+  - **Deps**: T19.7
+  - **Done when**:
+    - `SessionMeta` (UI mirror) gains optional
+      `titleSource: "auto" | "manual"`
+    - `ServerEvent.session_renamed` gains optional `titleSource`
+    - `reduceStreamEvent`'s `session_renamed` case updates BOTH
+      `title` and `titleSource` (defaulting missing field to
+      `"auto"`) on the matching session in `state.sessions[]`.
+      Reducer test pins the round-trip
+    - `Row` in `SessionList.tsx` watches `props.title` and
+      `props.animated`. When `prev !== current && animated`,
+      bump an `animKey` state. The
+      `<span className="cw-row-title">` gets `key={animKey}` so
+      React retriggers the CSS animation on every change. Cold-
+      start and identical-title renders do NOT bump the key.
+      `SessionList` passes `animated={true` for SSE-driven
+      renames and `animated={false` for the local rename input
+      flow
+    - `SessionList.test.tsx` (new): mounts `Row` with a title;
+      asserts the initial `key` is `"0"`. Updates the title via
+      prop with `animated={true`; asserts `key` is `"1"` after
+      the effect. Updates with `animated={false`; asserts the
+      key stays at `"0"`. Cold-start (no title change) asserts
+      `key` is `"0"`
+    - `bun run typecheck && bun test` is green
+
+- [ ] T19.9 — CSS: `@keyframes cw-row-title-in` #phase19 @ready target:phase19
+  - **Files**: `packages/ui/src/styles/global.css`
+  - **Deps**: T19.8
+  - **Done when**:
+    - `@keyframes cw-row-title-in` is added (translateX -8px →
+      0, opacity 0 → 1, 280ms ease-out)
+    - The `.cw-row-title` rule applies the animation
+    - `bun run typecheck && bun test` is green (visual-only
+      change; covered by the `SessionList` test)
+
+- [ ] T19.10 — Docs + smoke + ship #phase19 @ready target:phase19
+  - **Files**: `CLAUDE.md` (project), `docs/specs/phase-19-auto-retitle/README.md`
+    (Status: done, Done: <today>)
+  - **Deps**: T19.9
+  - **Done when**:
+    - Manual smoke against a real LLM (or `ScriptedProvider`):
+      - Start a fresh session, ask a question. The model
+        calls `rename_session` on turn 1 (or whenever it feels
+        confident). The sidebar title updates with the slide-in
+        animation
+      - Send a few more questions on the same topic; no rename
+      - Pivot to a new topic; the model calls `rename_session`
+        again on the next turn; sidebar updates with animation
+      - Rename via the UI; the next model rename attempt is
+        rejected (`manual_rename_locked` in the chat log)
+      - Set `COMPUTERWORKS_TITLE_LLM_DECIDES=false` and verify
+        the system prompt no longer mentions the tool; the
+        model never renames
+      - Set
+        `COMPUTERWORKS_TITLE_MIN_MESSAGES_BETWEEN_RENAMES=0`
+        and verify the model can rename every turn
+    - `CLAUDE.md` "Phase status" reflects Phase 19 done
+    - `bun run typecheck && bun test` is green
 
 ### Phase 20 — Skills support
 Skills are pre-defined bundles of (prompt prefix + tool
