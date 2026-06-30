@@ -39,19 +39,23 @@ const highlightCache = new Map<string, string>();
 // ─── Code-block component (with shiki highlight) ────────────────────────
 
 interface CodeProps extends React.HTMLAttributes<HTMLElement> {
-  inline?: boolean;
   className?: string;
   children?: React.ReactNode;
 }
 
-function CodeBlock(props: CodeProps): JSX.Element {
-  const { inline, className, children } = props;
-  const raw = extractText(children).replace(/\n$/, "");
-  const lang = typeof className === "string" && className.startsWith("language-")
-    ? className.slice("language-".length)
-    : undefined;
+// react-markdown 9 dropped the `inline` prop. We split inline from
+// fenced code by looking at the `language-xxx` className react-markdown
+// attaches to fenced blocks; inline code has no className.
+const LANGUAGE_RE = /^language-(.+)$/;
 
-  if (inline) {
+function CodeBlock(props: CodeProps): JSX.Element {
+  const { className, children } = props;
+  const raw = extractText(children).replace(/\n$/, "");
+  const match = typeof className === "string" ? LANGUAGE_RE.exec(className) : null;
+
+  if (!match) {
+    // Inline code (single backticks). Render as a monospace chip
+    // inside the surrounding paragraph; clicking copies the text.
     return (
       <code
         className="cw-inline-code"
@@ -65,7 +69,7 @@ function CodeBlock(props: CodeProps): JSX.Element {
     );
   }
 
-  return <FencedCode code={raw} lang={lang ?? "text"} />;
+  return <FencedCode code={raw} lang={match[1] ?? "text"} />;
 }
 
 function FencedCode({ code, lang }: { code: string; lang: string }): JSX.Element {

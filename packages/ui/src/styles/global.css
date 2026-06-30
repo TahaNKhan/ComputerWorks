@@ -511,6 +511,11 @@ input, textarea {
   border-radius: 4px;
   cursor: pointer;
   border: 1px solid var(--border);
+  /* `code` is inline by default; declare it for clarity and to defend
+     against future CSS resets. Wrap long identifiers instead of
+     overflowing the message bubble. */
+  display: inline;
+  word-break: break-word;
 }
 
 .cw-code-block {
