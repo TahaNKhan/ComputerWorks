@@ -397,12 +397,12 @@ describe("POST /api/sessions/:id/messages (per-message SSE)", () => {
     expect(finalAssistant.content).toEqual([{ type: "text", text: "done" }]);
   });
 
-  it("does not auto-title (T19: the model drives retitling via rename_session)", async () => {
-    // T19 retired the T12.2 first-turn auto-title generator. The
-    // session's title now stays empty until the model explicitly
-    // calls `rename_session` on a turn. The scripted provider in
-    // this test does not call the tool, so the title should remain
-    // empty after the turn.
+  it("falls back to a server-side title when the LLM doesn't call rename_session (T19.12)", async () => {
+    // T19.12 — even when the LLM is lax about calling
+    // `rename_session`, the server fills the gap with a
+    // deterministic `deriveTitle` call. The scripted provider in
+    // this test does not call the tool, but the session still
+    // gets titled after the first user message.
     const store = new SessionStore({ root: sessionsRoot });
     const app = await buildApp({
       config: { ...baseConfig, server: { ...baseConfig.server!, port: 4747 } },
@@ -422,14 +422,18 @@ describe("POST /api/sessions/:id/messages (per-message SSE)", () => {
     });
     expect(res.statusCode).toBe(200);
 
-    // The title should still be empty — the scripted provider did
-    // not call `rename_session`. (T19.7's integration test exercises
-    // the new path: scripted provider that DOES call the tool.)
-    // We poll briefly to be defensive (no fire-and-forget now, so the
-    // title can't be set after the turn).
-    await new Promise((r) => setTimeout(r, 50));
-    const meta = await store.get(sessionId);
-    expect(meta?.title).toBe("");
+    // Poll for the fallback to land — it's fire-and-forget.
+    let meta: Awaited<ReturnType<typeof store.get>>;
+    for (let i = 0; i < 100; i++) {
+      meta = await store.get(sessionId);
+      if (meta?.title && meta.title !== "") break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(meta?.title).not.toBe("");
+    // The fallback stamps `titleSource: "auto"` so a future
+    // `rename_session` call from the LLM can still update the title
+    // (only manual renames are sticky).
+    expect(meta?.titleSource).toBe("auto");
   }, 5_000);
 
   it("does not overwrite a manual title with auto-title", async () => {

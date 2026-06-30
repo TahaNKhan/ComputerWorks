@@ -37,12 +37,17 @@ function shellSafetyBlock(): string {
 - Don't pipe untrusted input through \`sh\` or \`eval\`.`;
 }
 
-/** T19.6 — the "Session title" section. Inlined when `llmDecides`
- *  is true; omitted entirely when false. The current title is
- *  passed in so the model can compare against it (otherwise it
- *  has no way to know whether a rename is warranted). The
- *  wording uses direct imperative ("Consider renaming...") and
- *  positive triggers — models gloss over hedged suggestions. */
+/** T19.6 / T19.12 — the "Session title" section. Inlined when
+ *  `llmDecides` is true; omitted entirely when false. The current
+ *  title is passed in so the model can compare against it
+ *  (otherwise it has no way to know whether a rename is warranted).
+ *
+ *  T19.12 — the model can rename freely (rate limit defaults to
+ *  0). The server also runs a deterministic `deriveTitle`
+ *  fallback after the first user message if the LLM doesn't
+ *  name the session, so the sidebar never stays "(untitled)"
+ *  for long. The section therefore no longer warns against
+ *  over-calling; the rate limit is opt-in via the env var. */
 function sessionTitleBlock(currentTitle: string): string {
   return `## Session title
 
@@ -50,22 +55,28 @@ The session title is shown in the sidebar. The CURRENT title is:
 \`${currentTitle || "(untitled)"}\`
 
 You have a tool called \`rename_session\` that updates this title.
-**Consider calling it on most turns.** The sidebar title is the
-primary way the user finds this conversation later — keeping it
-accurate is part of your job, not a nice-to-have.
+**Call it whenever the topic shifts or the current title is
+inaccurate.** The sidebar title is the primary way the user
+finds this conversation later — keeping it accurate is part
+of your job, not a nice-to-have.
 
 When to call \`rename_session\`:
-- The user has shifted topic (e.g. "now help me with React" after
-  ten K8s messages).
-- The current title is wrong, vague, or empty after turn 1.
+- The user has shifted topic (e.g. "now help me with React"
+  after ten K8s messages).
+- The current title is empty, wrong, or vague.
 - You can summarize the conversation confidently in 3-5 words.
+- The first substantive turn (after the user's first message,
+  the server falls back to a deterministic title if you
+  haven't already called this tool).
 
 When NOT to call:
-- The current title is already accurate.
-- The conversation is a single trivial exchange (e.g. "what time
-  is it"). On turn 1 if there's no signal yet, skip it.
+- The current title is already accurate and the topic hasn't
+  shifted.
+- The conversation is a single trivial exchange (e.g. "what
+  time is it"). On turn 1 if there's no real signal yet,
+  the server's fallback will handle it.
 - The user just renamed the session manually — the server will
-  reject with \`manual_rename_locked\`, but you don't need to retry.
+  reject with \`manual_rename_locked\`; you don't need to retry.
 
 Reply with the raw title only — no quotes, no prefix, no
 explanation. The tool sanitizes (strips quotes, collapses

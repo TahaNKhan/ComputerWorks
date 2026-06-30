@@ -124,7 +124,12 @@ export const ConfigSchema = z.object({
   /** T19.5 — LLM-driven session retitling. The model decides when
    *  to retitle via the `rename_session` tool (T19.2). These knobs
    *  tune the system's response: `llmDecides` is the master disable
-   *  switch; `minMessagesBetweenRenames` bounds the rate. */
+   *  switch; `minMessagesBetweenRenames` bounds the rate.
+   *
+   *  T19.12 — the default for `minMessagesBetweenRenames` is now
+   *  0 (no rate limit). Operators who want the model to be more
+   *  conservative can set it back to N user messages between
+   *  renames. */
   title: z
     .object({
       /** When false, the system-prompt section that teaches the
@@ -134,10 +139,9 @@ export const ConfigSchema = z.object({
       llmDecides: z.boolean().default(true),
       /** Minimum number of user messages between successful renames.
        *  The first rename (when `lastRenamedAtMessageCount` is
-       *  undefined) is always allowed. Default 3. Set to 0 to
-       *  disable the rate limit (model can rename every turn after
-       *  the first). */
-      minMessagesBetweenRenames: z.number().int().min(0).default(3),
+       *  undefined) is always allowed. Default 0 — the model can
+       *  rename every turn. Set to N to enforce a gap. */
+      minMessagesBetweenRenames: z.number().int().min(0).default(0),
     })
     .default({}),
 });

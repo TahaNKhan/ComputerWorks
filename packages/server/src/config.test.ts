@@ -280,11 +280,12 @@ describe("config file round-trip on disk", () => {
 
 // ─── T19.5 — title config knobs + env overrides ──────────────────────────
 
-describe("config.title (T19.5)", () => {
-  it("defaults: llmDecides true, minMessagesBetweenRenames 3", async () => {
+describe("config.title (T19.5/T19.12)", () => {
+  it("defaults: llmDecides true, minMessagesBetweenRenames 0 (no rate limit)", async () => {
     const cfg = await loadConfig({ path: join(dir, "nope.ts"), env: {} });
     expect(cfg.title.llmDecides).toBe(true);
-    expect(cfg.title.minMessagesBetweenRenames).toBe(3);
+    // T19.12 — default flipped to 0 so the model can rename freely.
+    expect(cfg.title.minMessagesBetweenRenames).toBe(0);
   });
 
   it("file config can override the defaults", async () => {
@@ -292,13 +293,13 @@ describe("config.title (T19.5)", () => {
       export default {
         title: {
           llmDecides: false,
-          minMessagesBetweenRenames: 0,
+          minMessagesBetweenRenames: 5,
         },
       };
     `);
     const cfg = await loadConfig({ path, env: {} });
     expect(cfg.title.llmDecides).toBe(false);
-    expect(cfg.title.minMessagesBetweenRenames).toBe(0);
+    expect(cfg.title.minMessagesBetweenRenames).toBe(5);
   });
 
   it("COMPUTERWORKS_TITLE_LLM_DECIDES=false flips the flag", async () => {
@@ -346,7 +347,7 @@ describe("config.title (T19.5)", () => {
       path: join(dir, "nope.ts"),
       env: { COMPUTERWORKS_TITLE_MIN_MESSAGES_BETWEEN_RENAMES: "abc" },
     });
-    expect(cfg.title.minMessagesBetweenRenames).toBe(3); // schema default
+    expect(cfg.title.minMessagesBetweenRenames).toBe(0); // schema default (no rate limit)
   });
 
   it("env wins over file config", async () => {

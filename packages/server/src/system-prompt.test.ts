@@ -39,9 +39,10 @@ describe("buildSystemPrompt (T19.6)", () => {
       expect(out).toContain("## Session title");
       expect(out).toContain("rename_session");
       expect(out).toContain("CURRENT title is:");
-      // T19.11 — the section is directive ("Consider calling it on
-      // most turns") instead of hedged.
-      expect(out).toContain("Consider calling it on most turns");
+      // T19.12 — the section is directive ("Call it whenever...") and
+      // acknowledges the server-side fallback for first-turn naming.
+      expect(out).toContain("Call it whenever the topic shifts");
+      expect(out).toContain("server's fallback will handle it");
       expect(out).toContain("manual_rename_locked");
     } finally {
       teardown();

@@ -65,16 +65,45 @@ The server tracks `meta.lastRenamedAtMessageCount` — the user-
 message count at the time of the most recent successful rename.
 The tool rejects renames where
 `userMessageCount - lastRenamedAtMessageCount < minMessagesBetweenRenames`
-(default 3). The **first** rename (when `lastRenamedAtMessageCount`
-is `undefined`) is always allowed, so the model can give the
-session an initial title on turn 1.
+(default **0** — no rate limit by default). Operators who want
+a backstop can tune via `config.title.minMessagesBetweenRenames`
+and `COMPUTERWORKS_TITLE_MIN_MESSAGES_BETWEEN_RENAMES`. The
+**first** rename (when `lastRenamedAtMessageCount` is `undefined`)
+is always allowed.
 
-The rate limit is purely a backstop — the system-prompt instruction
-is the primary signal that the model should only rename on topic
-shifts. The default (3) means after the first rename, the next
-rename is allowed on the 4th user message after that, then the
-7th, etc. Operators can tune via
-`COMPUTERWORKS_TITLE_MIN_MESSAGES_BETWEEN_RENAMES`.
+T19.12 — the rate limit defaults to 0. The model can rename every
+turn if it wants to. The server enforces no backstop. This matches
+the user's "let the LLM rename whenever it wants" preference;
+operators who want conservative behavior can opt in.
+
+## What "force the first-message name" means
+
+The LLM's first message isn't always reliable about calling
+`rename_session` — models are lazy about side-effect tools that
+don't help the user's task. To keep the sidebar useful, the
+server runs a fallback after every turn:
+
+1. Re-fetch `meta`. If `title` is non-empty OR
+   `titleSource === "manual"`, skip.
+2. Else call `deriveTitle` (T12.1's deterministic helper —
+   strips markdown noise, asks the LLM for a 3-5 word summary,
+   truncates at a word boundary).
+3. Re-check the title is still empty (race-safe via the
+   atomic `enqueueWrite` from T18).
+4. Patch meta with `{ title, titleSource: "auto" }` and
+   broadcast `session_renamed` via `SyncHub`.
+
+The fallback is fire-and-forget. Errors are logged + swallowed;
+the user's turn is never blocked on a working fallback. The
+fallback is also race-safe: a successful `rename_session` from
+the LLM on turn 1 wins because the meta read inside the fallback
+re-checks the title and bails if the LLM got there first.
+
+Once the session has any title (from the LLM, the fallback, or
+a manual rename), the fallback is permanently dormant for that
+session. A user can reset to untitled by `PATCH { title: "" }`
+(stamped as `titleSource: "auto"`), at which point the next
+message re-triggers the fallback.
 
 ## What "respect manual renames" means
 

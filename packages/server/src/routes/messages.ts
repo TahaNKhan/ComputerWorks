@@ -57,6 +57,7 @@ import type { ServerEvent } from "../sse.js";
 import type { Config } from "../config.js";
 import { buildSystemPrompt } from "../system-prompt.js";
 import { defaultTools } from "../tools/index.js";
+import { ensureTitleFallback } from "../title-fallback.js";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -284,11 +285,20 @@ export async function runAgentForSession(
       broadcastMessage(msg);
     }
 
-    // T19.4 — the T12.2 fire-and-forget first-turn title generator
-    // is gone. The model decides when to retitle by calling the
-    // `rename_session` tool (registered in `defaultTools`); its
-    // `execute` patches meta + broadcasts the rename directly.
-    // No background LLM call needed.
+    // T19.12 — server-side fallback title. The LLM can rename
+    // whenever it wants (no rate limit by default), but if the
+    // model doesn't call `rename_session` and the session is
+    // still untitled after a real user message has gone through,
+    // we force a title via `deriveTitle` (T12.1's deterministic
+    // helper). The check is re-run inside `ensureTitleFallback`
+    // against a fresh meta read so a race with a successful
+    // `rename_session` doesn't clobber the LLM's pick.
+    void ensureTitleFallback({
+      store: deps.store,
+      syncHub: deps.syncHub,
+      sessionId,
+      userContent,
+    });
 
     return eventCount;
   } finally {
