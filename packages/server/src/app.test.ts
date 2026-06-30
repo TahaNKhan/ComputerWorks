@@ -393,41 +393,17 @@ describe("POST /api/sessions/:id/messages (per-message SSE)", () => {
     expect(finalAssistant.content).toEqual([{ type: "text", text: "done" }]);
   });
 
-  it("auto-titles the session from the first user message (Phase 12.2: title is generated after the turn, not before)", async () => {
-    // The agent loop calls createProvider() once per chat() invocation.
-    // The title generator calls createProvider() again AFTER the turn.
-    // To simulate one persistent provider that returns the right
-    // frames in sequence, we hoist the cursor outside the factory.
-    const EXPECTED_TITLE = "Help me write a React component for a todo list";
-    const cursor = { i: 0 };
-    const frames: StreamEvent[][] = [
-      [
-        { type: "message_start" },
-        {
-          type: "tool_call",
-          call: { type: "tool_use", id: "c1", name: "echo", input: { msg: "hi" } },
-        },
-        { type: "message_done", usage: { input: 1, output: 1 } },
-      ],
-      [
-        { type: "message_start" },
-        { type: "token", delta: "done" },
-        { type: "message_done", usage: { input: 1, output: 1 } },
-      ],
-      // Third call = title gen; return the title as a token stream.
-      [
-        { type: "message_start" },
-        { type: "token", delta: EXPECTED_TITLE },
-        { type: "message_done", usage: { input: 1, output: 1 } },
-      ],
-    ];
-    const turnProvider = (): Provider => scriptedProviderWithFrames(frames, cursor);
-
+  it("does not auto-title (T19: the model drives retitling via rename_session)", async () => {
+    // T19 retired the T12.2 first-turn auto-title generator. The
+    // session's title now stays empty until the model explicitly
+    // calls `rename_session` on a turn. The scripted provider in
+    // this test does not call the tool, so the title should remain
+    // empty after the turn.
     const store = new SessionStore({ root: sessionsRoot });
     const app = await buildApp({
       config: { ...baseConfig, server: { ...baseConfig.server!, port: 4747 } },
       store,
-      createProvider: turnProvider,
+      createProvider: scriptedProvider,
       autoApprove: true,
     });
 
@@ -442,22 +418,15 @@ describe("POST /api/sessions/:id/messages (per-message SSE)", () => {
     });
     expect(res.statusCode).toBe(200);
 
-    // Phase 12.2 generates the title AFTER the turn, in a background
-    // call to the LLM. We poll for the title to land — the actual
-    // SSE response closes immediately after the agent's `done` event,
-    // so we can't rely on the response body to carry session_renamed.
-    let meta: Awaited<ReturnType<typeof store.get>>;
-    for (let i = 0; i < 200; i++) {
-      meta = await store.get(sessionId);
-      if (meta?.title && meta.title !== "") break;
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    expect(meta?.title).toBe(EXPECTED_TITLE);
-
-    const fetched = await app.inject({ method: "GET", url: `/api/sessions/${sessionId}` });
-    expect(fetched.statusCode).toBe(200);
-    expect(fetched.json().meta.title).toBe(EXPECTED_TITLE);
-  }, 15_000);
+    // The title should still be empty — the scripted provider did
+    // not call `rename_session`. (T19.7's integration test exercises
+    // the new path: scripted provider that DOES call the tool.)
+    // We poll briefly to be defensive (no fire-and-forget now, so the
+    // title can't be set after the turn).
+    await new Promise((r) => setTimeout(r, 50));
+    const meta = await store.get(sessionId);
+    expect(meta?.title).toBe("");
+  }, 5_000);
 
   it("does not overwrite a manual title with auto-title", async () => {
     const store = new SessionStore({ root: sessionsRoot });
@@ -478,6 +447,7 @@ describe("POST /api/sessions/:id/messages (per-message SSE)", () => {
       payload: { title: "My Custom Title" },
     });
     expect(rename.statusCode).toBe(200);
+    expect(rename.json().titleSource).toBe("manual");
     expect(rename.json().title).toBe("My Custom Title");
 
     const post = await app.inject({
@@ -495,7 +465,11 @@ describe("POST /api/sessions/:id/messages (per-message SSE)", () => {
     }
 
     const meta = await store.get(sessionId);
+    // T19: the manual title sticks because the scripted provider
+    // doesn't call `rename_session`. Even if it did, the tool would
+    // reject with `manual_rename_locked`.
     expect(meta?.title).toBe("My Custom Title");
+    expect(meta?.titleSource).toBe("manual");
   });
 
   it("returns 409 when a turn is already in flight on the same session", async () => {

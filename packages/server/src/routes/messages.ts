@@ -57,7 +57,6 @@ import type { ServerEvent } from "../sse.js";
 import type { Config } from "../config.js";
 import { buildSystemPrompt } from "../system-prompt.js";
 import { defaultTools } from "../tools/index.js";
-import { generateTitle } from "../title-generator.js";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -273,22 +272,11 @@ export async function runAgentForSession(
       broadcastMessage(msg);
     }
 
-    // T12.2 — Fire-and-forget LLM-generated title. Skipped when the
-    // session already has a title (manual rename, or
-    // createSession({ title })). Errors are logged + swallowed inside
-    // generateTitle so the route's return path is unaffected.
-    void generateTitle(
-      {
-        store: deps.store,
-        createProvider: deps.createProvider,
-        notify: (ev) => {
-          // T17.2 — title updates also route via the central SSE so
-          // every tab on this origin sees the rename.
-          deps.syncHub.broadcast(ev);
-        },
-      },
-      sessionId,
-    );
+    // T19.4 — the T12.2 fire-and-forget first-turn title generator
+    // is gone. The model decides when to retitle by calling the
+    // `rename_session` tool (registered in `defaultTools`); its
+    // `execute` patches meta + broadcasts the rename directly.
+    // No background LLM call needed.
 
     return eventCount;
   } finally {

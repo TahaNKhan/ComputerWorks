@@ -275,11 +275,10 @@ describe("T18 — session allowlist + pattern approval", () => {
 
       // ─── Second call: should auto-approve via the session allowlist
       // T18 — the second run uses a FRESH scripted provider so the
-      // shared cursor isn't bumped by `generateTitle`'s fire-and-
-      // forget chat call from the first run (in production the
-      // title generator uses a separate SDK client; the test
-      // script uses a shared closure-scoped cursor that needs to
-      // be reset between runs).
+      // shared cursor isn't bumped by any other consumer of the
+      // provider in the first run. (Pre-T19, generateTitle's
+      // fire-and-forget chat call was the second consumer; T19
+      // removed that path entirely.)
       const createProvider2 = echoShellProvider();
       const { writer: secondWriter, events: secondEvents } = recordingWriter();
       const secondApprover = new InteractiveApprover(
