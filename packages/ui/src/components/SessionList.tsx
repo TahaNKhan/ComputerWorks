@@ -4,13 +4,25 @@
 // T10 — Becomes a slide-in drawer on mobile (controlled by `open`).
 //        On tablet+ the `open` prop is ignored and the sidebar renders
 //        inline (see global.css `@media (min-width: 768px)`).
+// T19.8 — Sidebar row title slides in from the left when the
+//        server pushes a `session_renamed` event with
+//        `titleSource: "auto"` (i.e. the LLM-driven rename_session
+//        tool). Manual renames (titleSource: "manual") don't
+//        animate — the user just typed it, animating would feel
+//        off.
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useSessionsStore } from "../store/sessions.js";
 
 interface RowProps {
   id: string;
   title: string;
+  /** T19.8 — provenance of the title. Drives the slide-in
+   *  animation: "auto" → animate on change; "manual" or
+   *  undefined → no animation. The reducer fills this in from
+   *  the `session_renamed` SSE event; manual renames flow
+   *  through `renameSession` which sets it to "manual". */
+  titleSource?: "auto" | "manual";
   active: boolean;
   onSelect: () => void;
   onRename: (title: string) => void;
@@ -20,10 +32,28 @@ interface RowProps {
 function Row(props: RowProps): JSX.Element {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(props.title);
+  // T19.8 — animation key for the title <span>. Bumped when the
+  // title changes AND titleSource is "auto", which retriggers
+  // the CSS keyframe via React's `key` prop. Manual renames
+  // (titleSource "manual") don't bump the key — the user just
+  // typed the title; animating it would feel weird.
+  const [animKey, setAnimKey] = useState(0);
+  const prevTitle = useRef(props.title);
 
   useEffect(() => {
     setDraft(props.title);
   }, [props.title]);
+
+  // T19.8 — bump the animation key when the title changes due to
+  // an SSE-driven rename (titleSource: "auto"). Cold start (no
+  // change) and manual renames (titleSource: "manual") don't
+  // bump the key.
+  useEffect(() => {
+    if (prevTitle.current !== props.title && props.titleSource === "auto") {
+      setAnimKey((k) => k + 1);
+    }
+    prevTitle.current = props.title;
+  }, [props.title, props.titleSource]);
 
   if (editing) {
     return (
@@ -56,7 +86,9 @@ function Row(props: RowProps): JSX.Element {
       onClick={props.onSelect}
       title={new Date(props.id).toLocaleString()}
     >
-      <span className="cw-row-title">{props.title || "(untitled)"}</span>
+      <span key={animKey} className="cw-row-title">
+        {props.title || "(untitled)"}
+      </span>
       <span className="cw-row-actions">
         <button
           aria-label="Rename"
@@ -150,6 +182,7 @@ export function SessionList({ open, onClose }: SessionListProps): JSX.Element {
             key={s.id}
             id={s.id}
             title={s.title || s.id}
+            titleSource={s.titleSource}
             active={s.id === activeId}
             onSelect={() => {
               void switchSession(s.id);

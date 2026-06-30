@@ -310,8 +310,14 @@ export function reduceStreamEvent(
       break;
     }
     case "session_renamed": {
+      // T19.8 — propagate `titleSource` so the sidebar can
+      // decide whether the title change came from an SSE-driven
+      // tool call (animate) or a manual user PATCH (no
+      // animation). Missing field defaults to "auto" for forward
+      // compat with pre-T19 servers.
+      const source = ev.titleSource ?? "auto";
       nextSessions = state.sessions.map((s) =>
-        s.id === ev.sessionId ? { ...s, title: ev.title } : s,
+        s.id === ev.sessionId ? { ...s, title: ev.title, titleSource: source } : s,
       );
       break;
     }

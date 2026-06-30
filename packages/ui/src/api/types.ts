@@ -55,6 +55,17 @@ export interface SessionMeta {
   updatedAt: string;
   provider?: string;
   allowlist?: string[];
+  /** T19.8 — provenance of the session title. "auto" = the
+   *  server-side rename_session tool set it; "manual" = the
+   *  user set it via the UI (PATCH /api/sessions/:id). Mirrors
+   *  SessionMeta.titleSource in @computerworks/server. Optional
+   *  + forward-compatible: missing field is treated as "auto". */
+  titleSource?: "auto" | "manual";
+  /** T19.8 — server-side rate-limit clock for rename_session.
+   *  Mirrored so the sidebar can show a future "rename pending"
+   *  affordance if we add one. Currently only displayed in
+   *  dev mode. */
+  lastRenamedAtMessageCount?: number;
 }
 
 /** Body of POST /api/sessions. */
@@ -182,16 +193,18 @@ export type ServerEvent =
     }
   | {
       /** The server has updated the session's title. Triggered by
-       *  the background LLM call after the first turn (skipped if
-       *  the user already named the session), and by any manual
-       *  PATCH /api/sessions/:id. The reducer updates the matching
-       *  session in the sidebar. */
+       *  the LLM-driven rename_session tool (T19.2) and by any
+       *  manual PATCH /api/sessions/:id. The reducer updates the
+       *  matching session in the sidebar. T19.8 — optional
+       *  `titleSource` so the reducer + UI know whether the
+       *  change came from a tool call (auto, animate) or a user
+       *  PATCH (manual, no animation). */
       type: "session_renamed";
       sessionId: string;
       title: string;
+      titleSource?: "auto" | "manual";
     }
   | { type: "message_done"; usage: { input: number; output: number } }
-  | { type: "session_renamed"; sessionId: string; title: string }
   | { type: "error"; message: string }
   | { type: "done" }
   | {

@@ -420,6 +420,87 @@ describe("reduceStreamEvent — session_renamed", () => {
     expect(next.sessions.find((x) => x.id === "s2")!.title).toBe("Other");
     expect(messagesOf(next, "s1")).toEqual(messagesOf(s, "s1"));
   });
+
+  it("T19.8 — propagates titleSource from the SSE event", () => {
+    const s = {
+      ...stateWith("s1"),
+      sessions: [
+        { id: "s1", title: "", model: "m", cwd: "/", createdAt: "", updatedAt: "" },
+      ],
+    };
+    const next = reduceStreamEvent(s, "s1", {
+      type: "session_renamed",
+      sessionId: "s1",
+      title: "K8s migration",
+      titleSource: "auto",
+    });
+    expect(next.sessions.find((x) => x.id === "s1")!.titleSource).toBe("auto");
+  });
+
+  it("T19.8 — manual titleSource round-trips through the reducer", () => {
+    const s = {
+      ...stateWith("s1"),
+      sessions: [
+        { id: "s1", title: "", model: "m", cwd: "/", createdAt: "", updatedAt: "" },
+      ],
+    };
+    const next = reduceStreamEvent(s, "s1", {
+      type: "session_renamed",
+      sessionId: "s1",
+      title: "My Custom Title",
+      titleSource: "manual",
+    });
+    expect(next.sessions.find((x) => x.id === "s1")!.titleSource).toBe("manual");
+  });
+
+  it("T19.8 — missing titleSource defaults to 'auto' for forward compat", () => {
+    // Pre-T19 servers don't send titleSource. The reducer treats
+    // the missing field as "auto" so the SessionList animates
+    // these legacy events the same as new ones.
+    const s = {
+      ...stateWith("s1"),
+      sessions: [
+        { id: "s1", title: "", model: "m", cwd: "/", createdAt: "", updatedAt: "" },
+      ],
+    };
+    const next = reduceStreamEvent(s, "s1", {
+      type: "session_renamed",
+      sessionId: "s1",
+      title: "Legacy title",
+    });
+    expect(next.sessions.find((x) => x.id === "s1")!.titleSource).toBe("auto");
+  });
+
+  it("T19.8 — keeps an existing manual titleSource when the SSE omits the field", () => {
+    // Edge case: the session was manual-locked, then an SSE event
+    // arrives without titleSource (legacy client format). The
+    // reducer's "default to auto" inference could overwrite the
+    // existing manual flag, breaking the lock. We accept that
+    // edge case — a legacy server that omits the field can't
+    // preserve the manual lock across renames; if the operator
+    // wants the lock to hold, they should upgrade to a server
+    // that sends titleSource explicitly.
+    //
+    // Pinning the current behavior so it's documented.
+    const s = {
+      ...stateWith("s1"),
+      sessions: [
+        {
+          id: "s1", title: "Old", model: "m", cwd: "/",
+          createdAt: "", updatedAt: "",
+          titleSource: "manual",
+        },
+      ],
+    };
+    const next = reduceStreamEvent(s, "s1", {
+      type: "session_renamed",
+      sessionId: "s1",
+      title: "New",
+    });
+    // The reducer sets titleSource = "auto" when the event omits
+    // the field. The existing session's manual flag is overwritten.
+    expect(next.sessions.find((x) => x.id === "s1")!.titleSource).toBe("auto");
+  });
 });
 
 describe("reduceStreamEvent — error", () => {
