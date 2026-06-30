@@ -142,9 +142,10 @@ export async function runAgentForSession(
       memoryRoot,
       store: deps.store,
       syncHub: deps.syncHub,
-      // T19.2 — wire the LLM-driven rename rate limit through to
-      // the rename_session tool. Configurable via env in T19.5.
-      minMessagesBetweenRenames: 3,
+      // T19.5 — wire the LLM-driven rename rate limit from config.
+      // `config.title.minMessagesBetweenRenames` defaults to 3;
+      // `COMPUTERWORKS_TITLE_MIN_MESSAGES_BETWEEN_RENAMES` overrides.
+      minMessagesBetweenRenames: deps.config.title.minMessagesBetweenRenames,
     });
 
     const model = meta.model;

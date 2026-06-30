@@ -121,6 +121,25 @@ export const ConfigSchema = z.object({
       root: z.string().default("~/.computerworks/memory"),
     })
     .default({}),
+  /** T19.5 — LLM-driven session retitling. The model decides when
+   *  to retitle via the `rename_session` tool (T19.2). These knobs
+   *  tune the system's response: `llmDecides` is the master disable
+   *  switch; `minMessagesBetweenRenames` bounds the rate. */
+  title: z
+    .object({
+      /** When false, the system-prompt section that teaches the
+       *  model about `rename_session` is omitted entirely. The
+       *  model never learns about the tool, so it never calls it.
+       *  Default true. */
+      llmDecides: z.boolean().default(true),
+      /** Minimum number of user messages between successful renames.
+       *  The first rename (when `lastRenamedAtMessageCount` is
+       *  undefined) is always allowed. Default 3. Set to 0 to
+       *  disable the rate limit (model can rename every turn after
+       *  the first). */
+      minMessagesBetweenRenames: z.number().int().min(0).default(3),
+    })
+    .default({}),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -176,6 +195,24 @@ export function applyEnvOverrides(
   }
   if (env.COMPUTERWORKS_SERVER_HOST) {
     out.server.host = env.COMPUTERWORKS_SERVER_HOST;
+  }
+
+  // T19.5 — LLM-driven retitle knobs.
+  if (env.COMPUTERWORKS_TITLE_LLM_DECIDES !== undefined) {
+    const raw = env.COMPUTERWORKS_TITLE_LLM_DECIDES.trim().toLowerCase();
+    if (raw === "false" || raw === "0" || raw === "no" || raw === "off") {
+      out.title.llmDecides = false;
+    } else if (raw === "true" || raw === "1" || raw === "yes" || raw === "on") {
+      out.title.llmDecides = true;
+    }
+    // Anything else (including empty): leave the schema default.
+  }
+  if (env.COMPUTERWORKS_TITLE_MIN_MESSAGES_BETWEEN_RENAMES !== undefined) {
+    const n = Number(env.COMPUTERWORKS_TITLE_MIN_MESSAGES_BETWEEN_RENAMES);
+    if (Number.isInteger(n) && n >= 0) {
+      out.title.minMessagesBetweenRenames = n;
+    }
+    // Invalid (NaN / negative / non-integer): leave the schema default.
   }
 
   // Expand ~ in memory.root, since zod defaults it that way too.

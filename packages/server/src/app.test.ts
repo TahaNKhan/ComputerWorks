@@ -50,6 +50,10 @@ const baseConfig: Config = {
   defaultProvider: "anthropic",
   server: { host: "127.0.0.1", port: 4747 },
   approval: { autoApprove: { read: true, write: false, shell: false } },
+  // T19.5 — explicit defaults so the in-memory test config matches
+  // what `loadConfig()` produces. Tests that want a different
+  // rate limit override this field.
+  title: { llmDecides: true, minMessagesBetweenRenames: 3 },
 };
 
 const ECHO_TOOL: ToolDefinition = {

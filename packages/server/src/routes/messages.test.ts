@@ -73,6 +73,10 @@ function makeConfig(): Config {
       shellDenylist: [],
     },
     memory: { enabled: true, root: memoryRoot },
+    // T19.5 — explicit defaults so the test config matches what
+    // `loadConfig()` would produce. The rate limit defaults to 3;
+    // the integration test in T19.7 will override per-case.
+    title: { llmDecides: true, minMessagesBetweenRenames: 3 },
   };
 }
 

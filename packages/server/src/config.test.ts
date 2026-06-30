@@ -277,3 +277,88 @@ describe("config file round-trip on disk", () => {
     expect(readFileSync(path, "utf8")).toContain("MiniMax-M3");
   });
 });
+
+// ─── T19.5 — title config knobs + env overrides ──────────────────────────
+
+describe("config.title (T19.5)", () => {
+  it("defaults: llmDecides true, minMessagesBetweenRenames 3", async () => {
+    const cfg = await loadConfig({ path: join(dir, "nope.ts"), env: {} });
+    expect(cfg.title.llmDecides).toBe(true);
+    expect(cfg.title.minMessagesBetweenRenames).toBe(3);
+  });
+
+  it("file config can override the defaults", async () => {
+    const path = writeConfig(`
+      export default {
+        title: {
+          llmDecides: false,
+          minMessagesBetweenRenames: 0,
+        },
+      };
+    `);
+    const cfg = await loadConfig({ path, env: {} });
+    expect(cfg.title.llmDecides).toBe(false);
+    expect(cfg.title.minMessagesBetweenRenames).toBe(0);
+  });
+
+  it("COMPUTERWORKS_TITLE_LLM_DECIDES=false flips the flag", async () => {
+    const cfg = await loadConfig({
+      path: join(dir, "nope.ts"),
+      env: { COMPUTERWORKS_TITLE_LLM_DECIDES: "false" },
+    });
+    expect(cfg.title.llmDecides).toBe(false);
+  });
+
+  it("COMPUTERWORKS_TITLE_LLM_DECIDES=1 also flips it true (any truthy value)", async () => {
+    const cfg = await loadConfig({
+      path: join(dir, "nope.ts"),
+      env: { COMPUTERWORKS_TITLE_LLM_DECIDES: "1" },
+    });
+    expect(cfg.title.llmDecides).toBe(true);
+  });
+
+  it("invalid COMPUTERWORKS_TITLE_LLM_DECIDES falls back to schema default", async () => {
+    const cfg = await loadConfig({
+      path: join(dir, "nope.ts"),
+      env: { COMPUTERWORKS_TITLE_LLM_DECIDES: "maybe" },
+    });
+    expect(cfg.title.llmDecides).toBe(true); // schema default
+  });
+
+  it("COMPUTERWORKS_TITLE_MIN_MESSAGES_BETWEEN_RENAMES overrides", async () => {
+    const cfg = await loadConfig({
+      path: join(dir, "nope.ts"),
+      env: { COMPUTERWORKS_TITLE_MIN_MESSAGES_BETWEEN_RENAMES: "10" },
+    });
+    expect(cfg.title.minMessagesBetweenRenames).toBe(10);
+  });
+
+  it("COMPUTERWORKS_TITLE_MIN_MESSAGES_BETWEEN_RENAMES=0 disables the rate limit", async () => {
+    const cfg = await loadConfig({
+      path: join(dir, "nope.ts"),
+      env: { COMPUTERWORKS_TITLE_MIN_MESSAGES_BETWEEN_RENAMES: "0" },
+    });
+    expect(cfg.title.minMessagesBetweenRenames).toBe(0);
+  });
+
+  it("invalid COMPUTERWORKS_TITLE_MIN_MESSAGES_BETWEEN_RENAMES falls back to schema default", async () => {
+    const cfg = await loadConfig({
+      path: join(dir, "nope.ts"),
+      env: { COMPUTERWORKS_TITLE_MIN_MESSAGES_BETWEEN_RENAMES: "abc" },
+    });
+    expect(cfg.title.minMessagesBetweenRenames).toBe(3); // schema default
+  });
+
+  it("env wins over file config", async () => {
+    const path = writeConfig(`
+      export default {
+        title: { minMessagesBetweenRenames: 5 },
+      };
+    `);
+    const cfg = await loadConfig({
+      path,
+      env: { COMPUTERWORKS_TITLE_MIN_MESSAGES_BETWEEN_RENAMES: "0" },
+    });
+    expect(cfg.title.minMessagesBetweenRenames).toBe(0); // env won
+  });
+});
