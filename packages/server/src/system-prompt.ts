@@ -38,32 +38,38 @@ function shellSafetyBlock(): string {
 }
 
 /** T19.6 — the "Session title" section. Inlined when `llmDecides`
- *  is true; omitted entirely when false. Kept as a separate string
- *  so the test can assert inclusion/exclusion without rebuilding the
- *  whole prompt. */
-function sessionTitleBlock(): string {
+ *  is true; omitted entirely when false. The current title is
+ *  passed in so the model can compare against it (otherwise it
+ *  has no way to know whether a rename is warranted). The
+ *  wording uses direct imperative ("Consider renaming...") and
+ *  positive triggers — models gloss over hedged suggestions. */
+function sessionTitleBlock(currentTitle: string): string {
   return `## Session title
 
-The session title is shown in the sidebar and helps the user find
-this conversation later. You can update it by calling the
-\`rename_session\` tool with a 3-5 word title.
+The session title is shown in the sidebar. The CURRENT title is:
+\`${currentTitle || "(untitled)"}\`
 
-Call \`rename_session\` when:
-- The current title no longer describes the topic (e.g. the user
-  shifted from "K8s backup" to "React component").
-- You can summarize the conversation confidently (don't call it on
-  turn 1 if the user only said "hi" and you have no signal yet).
+You have a tool called \`rename_session\` that updates this title.
+**Consider calling it on most turns.** The sidebar title is the
+primary way the user finds this conversation later — keeping it
+accurate is part of your job, not a nice-to-have.
 
-Do NOT call \`rename_session\`:
-- On every turn — the server rate-limits you. If you call it too
-  soon after the previous rename, the tool returns \`rate_limited\`.
-- If the user has manually renamed the session. The server rejects
-  with \`manual_rename_locked\`; respect their choice.
-- For trivial exchanges that don't change the topic.
+When to call \`rename_session\`:
+- The user has shifted topic (e.g. "now help me with React" after
+  ten K8s messages).
+- The current title is wrong, vague, or empty after turn 1.
+- You can summarize the conversation confidently in 3-5 words.
 
-The tool sanitizes your input (strips quotes, collapses whitespace,
-truncates to 80 chars at a word boundary). Reply with the raw title
-text only — no quotes, no prefix, no explanation.
+When NOT to call:
+- The current title is already accurate.
+- The conversation is a single trivial exchange (e.g. "what time
+  is it"). On turn 1 if there's no signal yet, skip it.
+- The user just renamed the session manually — the server will
+  reject with \`manual_rename_locked\`, but you don't need to retry.
+
+Reply with the raw title only — no quotes, no prefix, no
+explanation. The tool sanitizes (strips quotes, collapses
+whitespace, truncates to 80 chars).
 `;
 }
 
@@ -74,15 +80,18 @@ terminal and approves every tool call that mutates state.
 
 ## Tool rules
 - run_shell, write_file, edit_file, write_memory require approval.
-  read_file, list_dir, read_memory, list_memory, search_memory do not.
+  read_file, list_dir, read_memory, list_memory, search_memory,
+  rename_session do not.
 - **Every tool call MUST include all required arguments** (path, command,
-  content, etc.). Calls missing required fields fail validation and
-  the user sees a structured error. Double-check your tool_use block
-  before sending.
+  content, title, etc.). Calls missing required fields fail
+  validation and the user sees a structured error. Double-check
+  your tool_use block before sending.
 - read_file refuses binary content. Use write_file for new files and
   edit_file for small in-place changes.
 - edit_file is atomic: ALL hunks must match before any write occurs.
   If one fails, the file is untouched.
+- **rename_session** updates the sidebar title — see the "Session
+  title" section below for when to call it.
 
 ${shellSafetyBlock()}
 
@@ -110,6 +119,12 @@ export interface BuildSystemPromptOptions {
    *  Operators disable LLM-driven retitling by setting this to
    *  false (config.title.llmDecides). */
   llmDecides?: boolean;
+  /** T19.11 — current session title. The "Session title" section
+   *  surfaces it so the model can compare against the topic and
+   *  decide whether to call `rename_session`. Without this, the
+   *  model has no signal that a rename is warranted. Defaults to
+   *  "" (treated as untitled). */
+  currentTitle?: string;
 }
 
 /**
@@ -124,10 +139,11 @@ export async function buildSystemPrompt(
   const notes = await opts.memory.list();
   const truncated = notes.slice(0, max);
   const llmDecides = opts.llmDecides ?? true;
+  const currentTitle = opts.currentTitle ?? "";
 
   const lines: string[] = [STATIC_PREFIX];
   if (llmDecides) {
-    lines.push(sessionTitleBlock());
+    lines.push(sessionTitleBlock(currentTitle));
   }
   lines.push(`## Session`);
   lines.push(`- cwd: \`${opts.cwd}\``);

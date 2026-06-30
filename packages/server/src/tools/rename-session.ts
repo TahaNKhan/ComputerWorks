@@ -101,21 +101,23 @@ export function createRenameSessionTool(
   return {
     name: "rename_session",
     description:
-      "Update the session title visible in the sidebar. " +
-      "Call this when the conversation topic has drifted and the " +
-      "current title is no longer representative. " +
-      "The title should be 3-5 words, lowercase unless a word is " +
-      "a proper noun. " +
-      "Do NOT call this on every turn — only when the topic genuinely " +
-      "shifts. " +
-      "Returns { ok: true, title } on success, or " +
-      "{ ok: false, reason } where reason is one of: " +
-      `"manual_rename_locked" (user renamed the session, respect ` +
-      `their choice), "rate_limited" (called too soon after the last ` +
-      `rename — min ${opts.minMessagesBetweenRenames} user messages ` +
-      `between renames), "empty_after_sanitize" (the title was empty ` +
-      `after stripping quotes/whitespace/punctuation), or ` +
-      `"session_not_found" (defensive).`,
+      `Update the session title shown in the sidebar so the user ` +
+      `can find this conversation later. ` +
+      `CALL THIS WHENEVER the topic has shifted or the current ` +
+      `title is empty / inaccurate. ` +
+      `The title should be 3-5 words (lowercase, except proper ` +
+      `nouns). ` +
+      `Returns { ok: true, title } on success, or { ok: false, ` +
+      `reason } where reason is one of: ` +
+      `"manual_rename_locked" (user renamed the session — respect ` +
+      `their choice, do NOT retry), ` +
+      `"rate_limited" (called too soon — min ` +
+      `${opts.minMessagesBetweenRenames} user messages between ` +
+      `renames; back off), ` +
+      `"empty_after_sanitize" (the title was empty after ` +
+      `stripping quotes/whitespace/punctuation — try a different ` +
+      `title), ` +
+      `or "session_not_found" (defensive).`,
     inputSchema: renameSessionInputSchema as unknown as ToolDefinition["inputSchema"],
     requiresApproval: false,
     async execute(input: RenameSessionInput, ctx: ToolContext): Promise<RenameResult> {

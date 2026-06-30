@@ -158,6 +158,10 @@ export async function runAgentForSession(
       // operator's config flag. When false, the model never learns
       // about rename_session.
       llmDecides: deps.config.title.llmDecides,
+      // T19.11 — surface the current title so the model can compare
+      // against the conversation topic and decide whether a rename
+      // is warranted. Without this, the model has no signal.
+      currentTitle: meta.title,
     });
 
     // Load prior history.
