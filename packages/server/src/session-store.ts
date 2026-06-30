@@ -162,6 +162,11 @@ export interface CreateSessionInput {
   cwd: string;
   model: string;
   title?: string;
+  /** T19.3 — provenance of the title. "manual" when the caller
+   *  supplied a `title` on create (POST /api/sessions with title);
+   *  "auto" (default) when created title-less, so the LLM-driven
+   *  rename tool can fill it in. */
+  titleSource?: "auto" | "manual";
   provider?: string;
   allowlist?: string[];
   systemPromptOverrides?: string;
@@ -231,6 +236,7 @@ export class SessionStore {
     const meta: SessionMeta = SessionMetaSchema.parse({
       id,
       title: input.title ?? "",
+      titleSource: input.titleSource ?? "auto",
       createdAt: now,
       updatedAt: now,
       cwd: input.cwd,

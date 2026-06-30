@@ -21,13 +21,47 @@ const CreateBody = z.object({
   cwd: b.cwd ?? process.cwd(),
   model: b.model ?? process.env.MINIMAX_DEFAULT_MODEL ?? "MiniMax-M3",
   title: b.title,
+  // T19.3 — every create-with-title is a manual title. The store
+  // records `titleSource: "manual"` so the LLM-driven rename tool
+  // is permanently locked out for this session. A create WITHOUT a
+  // title leaves the source as `"auto"` (default in the schema).
+  titleSource: b.title !== undefined ? ("manual" as const) : undefined,
 }));
 
-const PatchBody = z.object({
-  title: z.string().optional(),
-  cwd: z.string().optional(),
-  model: z.string().optional(),
-});
+const PatchBody = z
+  .object({
+    title: z.string().optional(),
+    titleSource: z.enum(["auto", "manual"]).optional(),
+    lastRenamedAtMessageCount: z.number().int().min(0).optional(),
+    cwd: z.string().optional(),
+    model: z.string().optional(),
+  })
+  .strict();
+
+/** T19.3 — infer `titleSource` from a PATCH. Rules:
+ *  - If the patch sets a non-empty title and no explicit
+ *    `titleSource` is provided, stamp `"manual"` (the user renamed).
+ *  - If the patch clears the title (`""`) and no explicit
+ *    `titleSource` is provided, stamp `"auto"` (reset to
+ *    retitle-eligible).
+ *  - If the patch only touches `titleSource` (escape hatch), pass
+ *    it through unchanged.
+ *  - If neither field is set, return null (no inference needed).
+ *
+ *  Called after the route's zod parse succeeds. Mutates a fresh
+ *  copy of `parsed.data` so the route can pass it to `store.patch`
+ *  unchanged. */
+function inferTitleSourceFromPatch(
+  body: z.infer<typeof PatchBody>,
+): { titleSource: "auto" | "manual" } | null {
+  if (body.titleSource !== undefined) {
+    return { titleSource: body.titleSource };
+  }
+  if (body.title === undefined) {
+    return null;
+  }
+  return { titleSource: body.title === "" ? "auto" : "manual" };
+}
 
 export async function registerSessionRoutes(
   app: FastifyInstance,
@@ -55,6 +89,7 @@ export async function registerSessionRoutes(
       cwd: body.cwd,
       model: body.model,
       title: body.title,
+      ...(body.titleSource !== undefined ? { titleSource: body.titleSource } : {}),
     });
     return reply.code(201).send(meta);
   });
@@ -75,8 +110,15 @@ export async function registerSessionRoutes(
     if (!parsed.success) {
       return reply.code(400).send({ error: parsed.error.message });
     }
+    // T19.3 — infer titleSource from the patch shape. We merge the
+    // inferred field into a shallow copy so the route stays a
+    // thin pass-through to `store.patch`.
+    const inferred = inferTitleSourceFromPatch(parsed.data);
+    const merged = inferred
+      ? { ...parsed.data, ...inferred }
+      : parsed.data;
     try {
-      const updated = await store.patch(id, parsed.data);
+      const updated = await store.patch(id, merged);
       return updated;
     } catch (err) {
       const msg = (err as Error).message;
