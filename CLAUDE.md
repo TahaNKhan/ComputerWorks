@@ -116,9 +116,26 @@ ASCII box-drawing in diagrams is forbidden; use Mermaid.
   can't clobber each other. The audit log distinguishes
   `auto_approve` (pattern matched) from `approve_once` (manual
   click).
-- 🎉 Build complete — no further phases planned (Phase 18 was the
-  last architectural change; the codebase is now `main`-only, no
-  phase branches)
+- ✅ Phase 19 — LLM-driven session retitling merged into main on
+  2026-06-29. Replaces the T12.2 fire-and-forget first-turn title
+  generator with a single in-loop tool call: the model decides when
+  to retitle by calling the new auto-approved `rename_session` tool
+  during any turn. The server enforces a server-side rate limit
+  (default min 3 user messages between renames, env-overridable via
+  `COMPUTERWORKS_TITLE_MIN_MESSAGES_BETWEEN_RENAMES`) and respects
+  manual renames via the new `SessionMeta.titleSource: "auto" |
+  "manual"` field. The T12.2 generator + `title-generator.ts` are
+  deleted (single code path, no background LLM call). Cross-tab sync
+  piggybacks on the existing `session_renamed` event + `SyncHub`
+  (the event gains an optional `titleSource` field). The sidebar
+  slide-in animation (`@keyframes cw-row-title-in`, 280ms) fires
+  only when the title changes from an SSE-driven auto-rename, never
+  on manual user renames or cold start. Operators can disable the
+  LLM-driven path entirely with `COMPUTERWORKS_TITLE_LLM_DECIDES=false`
+  (the Session title system-prompt section is omitted).
+- 🎉 Build complete — no further architectural phases planned
+  (the codebase is now `main`-only, no phase branches); future
+  features are layered on top of the Phase 14+19 + 17 + 18 stack.
 
 ## CRITICAL: How to update TASKS.MD
 

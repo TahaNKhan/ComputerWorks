@@ -1315,7 +1315,7 @@ model emits on turn 1.
     - `bun run typecheck && bun test` is green (visual-only
       change; covered by the `SessionList` test)
 
-- [ ] T19.10 — Docs + smoke + ship #phase19 @ready target:phase19
+- [x] T19.10 — Docs + smoke + ship #phase19 @ready target:phase19 _done:2026-06-29
   - **Files**: `CLAUDE.md` (project), `docs/specs/phase-19-auto-retitle/README.md`
     (Status: done, Done: <today>)
   - **Deps**: T19.9

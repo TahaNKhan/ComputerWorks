@@ -1,8 +1,8 @@
 # Phase 19 — LLM-driven session retitling
 
-**Status:** in-progress (spec)
+**Status:** done
 **Started:** 2026-06-29
-**Done:** —
+**Done:** 2026-06-29
 
 ## Isolation
 - **Branch:** `main`
