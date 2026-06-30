@@ -41,6 +41,17 @@ import type { Message, Role } from "@computerworks/core";
 export const SessionMetaSchema = z.object({
   id: z.string().min(1),
   title: z.string().default(""),
+  /** T19.3 — "auto" = eligible for the LLM-driven rename tool;
+   *  "manual" = user set the title, locked from auto-retitling.
+   *  Forward-compatible: old meta.json without this field
+   *  defaults to "auto". */
+  titleSource: z.enum(["auto", "manual"]).default("auto"),
+  /** T19.2 — user-message count at the time of the most recent
+   *  successful LLM-driven rename. Drives the server-side rate
+   *  limit on `rename_session` (default min 3 user messages
+   *  between renames). `undefined` means "no rename yet" — the
+   *  first rename is always allowed. */
+  lastRenamedAtMessageCount: z.number().int().min(0).optional(),
   createdAt: z.string(), // ISO-8601
   updatedAt: z.string(), // ISO-8601
   cwd: z.string(),
@@ -62,7 +73,17 @@ const allowlistEntry = z.union([
 /** A subset of `SessionMeta` the caller is allowed to change. */
 export const SessionPatchSchema = z
   .object({
-    title: z.string().min(1).optional(),
+    title: z.string().optional(),
+    /** T19.3 — explicit source override. The PATCH handler stamps
+     *  "manual" when `title` is set (and `"manual"` isn't already
+     *  supplied); setting `titleSource` explicitly here bypasses
+     *  the inference (escape hatch for tools/tests that want to
+     *  reset a session back to "auto"). */
+    titleSource: z.enum(["auto", "manual"]).optional(),
+    /** T19.2 — bumps when an LLM-driven rename lands. The
+     *  server-side rate limit consults this field; clients rarely
+     *  set it directly. */
+    lastRenamedAtMessageCount: z.number().int().min(0).optional(),
     cwd: z.string().min(1).optional(),
     model: z.string().min(1).optional(),
     allowlist: z.array(allowlistEntry).optional(),
@@ -310,6 +331,17 @@ export class SessionStore {
     const updated: SessionMeta = {
       id: current.id,
       title: validPatch.title ?? current.title,
+      // T19.3 — `titleSource` defaults to "auto" when the patch
+      // omits it. `patchUnlocked` is the only writer for this
+      // field outside the LLM-driven rename tool, so the
+      // inference lives in the PATCH handler — here we just
+      // preserve whatever's there.
+      titleSource: validPatch.titleSource ?? current.titleSource ?? "auto",
+      // T19.2 — rate-limit clock. `lastRenamedAtMessageCount`
+      // is bumped by the rename tool on every successful rename;
+      // PATCH clients can override it explicitly if they have a
+      // reason (none in v1).
+      lastRenamedAtMessageCount: validPatch.lastRenamedAtMessageCount ?? current.lastRenamedAtMessageCount,
       createdAt: current.createdAt,
       updatedAt: new Date().toISOString(),
       cwd: validPatch.cwd ?? current.cwd,

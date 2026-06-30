@@ -1067,7 +1067,7 @@ The T12.2 first-turn generator is **deleted** — no
 `routes/messages.ts`. The first-turn title becomes whatever the
 model emits on turn 1.
 
-- [ ] T19.1 — Scope LLM-driven retitling #phase19 @ready target:phase19
+- [x] T19.1 — Scope LLM-driven retitling #phase19 @ready target:phase19 _done:2026-06-29
   - **Files**: `docs/specs/phase-19-auto-retitle/{README,requirements,design}.md`
   - **Deps**: none
   - **Done when**:

@@ -3,12 +3,17 @@
 //
 // Per DESIGN.MD §8.4 the server registers a default set of tools:
 //   run_shell, read_file, write_file, edit_file, list_dir,
-//   read_memory, write_memory, list_memory, search_memory.
+//   read_memory, write_memory, list_memory, search_memory,
+//   rename_session (T19.2).
 //
 // We wrap each tool with a session-scoped ToolContext that injects the
 // session's cwd and abort signal at execute time. For v1 the memory
 // tools are wired through a single FileMemoryProvider instance per
-// process (the user has one memory root per-machine).
+// process (the user has one memory root per-machine). The
+// `rename_session` tool is constructed in this file because it needs
+// the SessionStore + SyncHub to do its job — we close over those
+// at registration time so the tool has no runtime deps beyond the
+// standard ToolContext.
 
 import { z } from "zod";
 import type { ToolDefinition, ToolContext } from "@computerworks/core";
@@ -17,6 +22,9 @@ import {
 } from "@computerworks/tools-shell";
 import { tools as filesTools } from "@computerworks/tools-files";
 import { createFileMemoryProvider, type MemoryProvider } from "@computerworks/memory-files";
+import { createRenameSessionTool } from "./rename-session.js";
+import type { SessionStore } from "../session-store.js";
+import type { SyncHub } from "../sync-hub.js";
 
 /** Input schemas for the memory tools (the tool package exports the
  *  provider but not zod-typed ToolDefinitions). */
@@ -86,8 +94,21 @@ function memoryTools(mem: MemoryProvider): ToolDefinition[] {
  * types (with defaults applied); we cast through `unknown as never` only
  * at the boundary to satisfy TS strict-mode variance. Runtime is
  * unaffected.
+ *
+ * T19.2 — the `rename_session` tool is constructed here because it
+ * needs the SessionStore + SyncHub. We close over both at registration
+ * time; the tool's `execute` then does the persistence + broadcast
+ * synchronously inside the agent loop's tool-execution phase.
  */
-export function defaultTools(opts: { memoryRoot: string }): {
+export function defaultTools(opts: {
+  memoryRoot: string;
+  store: SessionStore;
+  syncHub: SyncHub;
+  /** Minimum number of user messages between successful renames.
+   *  Default 3; operators tune via
+   *  `COMPUTERWORKS_TITLE_MIN_MESSAGES_BETWEEN_RENAMES`. */
+  minMessagesBetweenRenames: number;
+}): {
   tools: ToolDefinition[];
   memory: MemoryProvider;
 } {
@@ -100,6 +121,12 @@ export function defaultTools(opts: { memoryRoot: string }): {
       ...(filesTools as unknown as ToolDefinition[]),
       // Memory tools (read, write, list, search)
       ...memoryTools(memory),
+      // T19.2 — LLM-driven session rename tool.
+      createRenameSessionTool({
+        store: opts.store,
+        syncHub: opts.syncHub,
+        minMessagesBetweenRenames: opts.minMessagesBetweenRenames,
+      }),
     ],
     memory,
   };

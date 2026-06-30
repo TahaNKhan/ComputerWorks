@@ -139,7 +139,14 @@ export async function runAgentForSession(
 
     const provider = deps.createProvider(perRequestOverrides);
     const memoryRoot = meta.memoryRoot ?? defaultMemoryRoot();
-    const { tools, memory } = defaultTools({ memoryRoot });
+    const { tools, memory } = defaultTools({
+      memoryRoot,
+      store: deps.store,
+      syncHub: deps.syncHub,
+      // T19.2 — wire the LLM-driven rename rate limit through to
+      // the rename_session tool. Configurable via env in T19.5.
+      minMessagesBetweenRenames: 3,
+    });
 
     const model = meta.model;
 

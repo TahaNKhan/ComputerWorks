@@ -51,7 +51,16 @@ export type ServerEvent =
       reason?: string;
     }
   | { type: "message_done"; usage: { input: number; output: number } }
-  | { type: "session_renamed"; sessionId: string; title: string }
+  | {
+      type: "session_renamed";
+      sessionId: string;
+      title: string;
+      /** T19.2 — provenance of the new title. "auto" for the
+       *  LLM-driven rename_session tool; "manual" for a user PATCH.
+       *  Optional + forward-compatible: clients that ignore the
+       *  missing field still work (treat as "auto"). */
+      titleSource?: "auto" | "manual";
+    }
   | { type: "error"; message: string }
   | { type: "done" }
   | {
