@@ -69,6 +69,16 @@ export interface AgentRunOptions {
   signal: AbortSignal;
   /** Default 25 (per DESIGN.MD §6.2). */
   maxIterations?: number;
+  /**
+   * T19.2 — session id forwarded to the ToolContext for every tool
+   * call. Tools that need session-scoped state (e.g. the
+   * `rename_session` tool) read this from the context instead of
+   * the previous hardcoded `"agent-loop"` literal. Required when
+   * the registry includes session-aware tools; the agent loop
+   * defaults to `"agent-loop"` if absent (preserves pre-T19
+   * behavior for any caller that doesn't pass it).
+   */
+  sessionId?: string;
 }
 
 const DEFAULT_MAX_ITERATIONS = 25;
@@ -257,7 +267,12 @@ export async function runTurn(opts: AgentRunOptions): Promise<Message> {
             cwd: process.cwd(),
             signal,
             env: process.env,
-            sessionId: "agent-loop",
+            // T19.2 — pass the real session id so session-scoped
+            // tools (rename_session, run_shell with cwd-scoped
+            // future features, etc.) see the right id. Pre-T19 the
+            // literal "agent-loop" was a placeholder that no tool
+            // actually consulted.
+            sessionId: opts.sessionId ?? "agent-loop",
           },
         );
         decisionContent = typeof result === "string" ? result : JSON.stringify(result);

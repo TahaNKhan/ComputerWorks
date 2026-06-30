@@ -208,6 +208,9 @@ export async function runAgentForSession(
         approver,
         signal,
         maxIterations: 25,
+        // T19.2 — forward the real session id so the rename_session
+        // tool (and any future session-aware tool) sees the right id.
+        sessionId,
         onEvent: (ev: AgentEvent) => {
           eventCount++;
           // Persist an audit entry for every tool_result so the

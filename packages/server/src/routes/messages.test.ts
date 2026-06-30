@@ -342,3 +342,348 @@ describe("T18 — session allowlist + pattern approval", () => {
     30_000,
   );
 });
+
+// ─── T19.7 — LLM-driven session retitling via rename_session ─────────────
+
+/** Scripted provider that calls `rename_session` on its first turn,
+ *  then a different title on its second turn. Used to exercise the
+ *  rate limit. The agent loop calls chat() twice per turn (once
+ *  before the tool call, once after the tool result is appended). */
+function renameProvider(): () => Provider {
+  const cursor = { i: 0 };
+  return () => ({
+    id: "scripted",
+    capabilities: { toolUse: true, promptCaching: false, vision: false },
+    async *chat(): AsyncIterable<StreamEvent> {
+      cursor.i++;
+      yield { type: "message_start" };
+      // First call: emit rename_session. Subsequent calls: terminate
+      // (no tool_call) so the loop ends.
+      if (cursor.i === 1) {
+        yield {
+          type: "tool_call",
+          call: {
+            type: "tool_use",
+            id: "r1",
+            name: "rename_session",
+            input: { title: "K8s backup script" },
+          },
+        };
+      } else {
+        yield { type: "token", delta: "ok" };
+      }
+      yield { type: "message_done", usage: { input: 1, output: 1 } };
+    },
+  });
+}
+
+/** Scripted provider that ALWAYS calls rename_session, no matter
+ *  the turn. Used to exercise the rate limit (a second call
+ *  within the min interval must be rejected). */
+function alwaysRenameProvider(titleFn: (i: number) => string): () => Provider {
+  return () => ({
+    id: "scripted",
+    capabilities: { toolUse: true, promptCaching: false, vision: false },
+    async *chat(this: unknown): AsyncIterable<StreamEvent> {
+      // The cursor is hoisted so successive chat() invocations
+      // see different titles.
+      (this as { _i: number })._i = ((this as { _i?: number })._i ?? 0) + 1;
+      const i = (this as { _i: number })._i;
+      yield { type: "message_start" };
+      if (i % 2 === 1) {
+        yield {
+          type: "tool_call",
+          call: {
+            type: "tool_use",
+            id: `r${i}`,
+            name: "rename_session",
+            input: { title: titleFn(i) },
+          },
+        };
+      } else {
+        yield { type: "token", delta: "ok" };
+      }
+      yield { type: "message_done", usage: { input: 1, output: 1 } };
+    },
+  });
+}
+
+describe("T19.7 — rename_session integration", () => {
+  it("the model calls rename_session on turn 1 → title is set + broadcast", async () => {
+    const store = new SessionStore({ root: sessionsRoot });
+    const registry = new SessionRegistry();
+    const syncHub = new SyncHub();
+    const broadcasts: ServerEvent[] = [];
+    syncHub.subscribe({
+      write(ev) { broadcasts.push(ev); },
+      end() {},
+      get closed() { return false; },
+    });
+    const createProvider = renameProvider();
+
+    const meta = await store.create({ cwd: process.cwd(), model: "test-model" });
+    const sessionId = meta.id;
+
+    const { writer, events } = recordingWriter();
+    const approver = new InteractiveApprover(
+      writer, syncHub, sessionId, [], [], { timeoutMs: 5_000 },
+    );
+    const start = registry.startIfIdle(sessionId, approver, "test-tab");
+    expect(start.busy).toBe(false);
+
+    await runAgentForSession(
+      {
+        store, registry, config: makeConfig(), createProvider, syncHub,
+      },
+      sessionId, "Help with K8s backups", writer, start.runtime,
+    );
+
+    // The tool ran and persisted.
+    const after = await store.get(sessionId);
+    expect(after?.title).toBe("K8s backup script");
+    expect(after?.titleSource).toBe("auto");
+    expect(after?.lastRenamedAtMessageCount).toBe(1);
+
+    // The session_renamed event fired on the central SSE with the
+    // new titleSource. Tabs see it; the reducer updates the
+    // sidebar.
+    const renameBroadcasts = broadcasts.filter(
+      (e) => e.type === "session_renamed" && e.sessionId === sessionId,
+    );
+    expect(renameBroadcasts.length).toBe(1);
+    const ev = renameBroadcasts[0]!;
+    if (ev.type !== "session_renamed") throw new Error("unreachable");
+    expect(ev.title).toBe("K8s backup script");
+    expect(ev.titleSource).toBe("auto");
+  }, 15_000);
+
+  it("tool_result event carries { ok: true, title: ... } for the model", async () => {
+    const store = new SessionStore({ root: sessionsRoot });
+    const registry = new SessionRegistry();
+    const syncHub = new SyncHub();
+    const createProvider = renameProvider();
+
+    const meta = await store.create({ cwd: process.cwd(), model: "test-model" });
+    const sessionId = meta.id;
+
+    const { writer, events } = recordingWriter();
+    const approver = new InteractiveApprover(
+      writer, syncHub, sessionId, [], [], { timeoutMs: 5_000 },
+    );
+    const start = registry.startIfIdle(sessionId, approver, "test-tab");
+
+    await runAgentForSession(
+      {
+        store, registry, config: makeConfig(), createProvider, syncHub,
+      },
+      sessionId, "first turn", writer, start.runtime,
+    );
+
+    // T17.3 — the InteractiveApprover writes tool_result to BOTH the
+    // leader's per-message stream AND the central SyncHub, so the
+    // leader's view doesn't depend on the SharedWorker. Both writes
+    // land on this in-memory writer (we passed the same `writer`
+    // to the approver AND to `runAgentForSession`), so duplicates
+    // are expected. `.find()` returns the first one.
+    const tr = events.find(
+      (e) => e.type === "tool_result" && e.call_id === "r1",
+    );
+    if (tr?.type !== "tool_result") throw new Error("expected tool_result");
+    expect(tr.approved).toBe(true);
+    expect(tr.is_error).toBe(false);
+    // The agent loop stringifies non-string tool results before
+    // putting them on the SSE event; JSON.parse round-trips.
+    expect(JSON.parse(tr.result)).toEqual({ ok: true, title: "K8s backup script" });
+  }, 15_000);
+
+  it("rate limit: a second rename within min user messages is rejected", async () => {
+    const store = new SessionStore({ root: sessionsRoot });
+    const registry = new SessionRegistry();
+    const syncHub = new SyncHub();
+    const broadcasts: ServerEvent[] = [];
+    syncHub.subscribe({
+      write(ev) { broadcasts.push(ev); },
+      end() {},
+      get closed() { return false; },
+    });
+
+    // Title says "First" then "Second" — a malicious model
+    // trying to rename every turn. min=3 user messages, so
+    // the second call (also on "turn 1" of its own message)
+    // should be rate-limited.
+    const createProvider = alwaysRenameProvider((i) =>
+      i === 1 ? "First" : "Second",
+    );
+
+    const meta = await store.create({ cwd: process.cwd(), model: "test-model" });
+    const sessionId = meta.id;
+
+    // ─── First turn: rename succeeds ──────────────────────────────
+    {
+      const { writer, events } = recordingWriter();
+      const approver = new InteractiveApprover(
+        writer, syncHub, sessionId, [], [], { timeoutMs: 5_000 },
+      );
+      const start = registry.startIfIdle(sessionId, approver, "test-tab");
+
+      await runAgentForSession(
+        {
+          store, registry, config: makeConfig(), createProvider, syncHub,
+        },
+        sessionId, "u1", writer, start.runtime,
+      );
+
+      const after = await store.get(sessionId);
+      expect(after?.title).toBe("First");
+      // runAgentForSession appends the user message before the loop
+      // runs, so userCount = 1 and lastRenamedAtMessageCount = 1.
+      expect(after?.lastRenamedAtMessageCount).toBe(1);
+
+      // tool_result for the rename should be ok:true.
+      const tr = events.find(
+        (e) => e.type === "tool_result" && e.call_id === "r1",
+      );
+      if (tr?.type !== "tool_result") throw new Error("expected tool_result");
+      expect(JSON.parse(tr.result)).toEqual({ ok: true, title: "First" });
+    }
+
+    // ─── Second turn: rename rejected (rate-limited) ──────────────
+    {
+      const { writer, events } = recordingWriter();
+      const approver = new InteractiveApprover(
+        writer, syncHub, sessionId, [], [], { timeoutMs: 5_000 },
+      );
+      const start = registry.startIfIdle(sessionId, approver, "test-tab");
+
+      await runAgentForSession(
+        {
+          store, registry, config: makeConfig(), createProvider, syncHub,
+        },
+        sessionId, "u2", writer, start.runtime,
+      );
+
+      // The title is unchanged.
+      const after = await store.get(sessionId);
+      expect(after?.title).toBe("First");
+      expect(after?.lastRenamedAtMessageCount).toBe(1);
+
+      // tool_result for the second rename carries the rejection. The
+      // scripted provider's cursor restarts on each request (each
+      // `createProvider()` returns a fresh provider), so the call_id
+      // is the same as turn 1 — find by content instead.
+      const tr = events.find(
+        (e) =>
+          e.type === "tool_result" &&
+          typeof e.result === "string" &&
+          e.result.includes("rate_limited"),
+      );
+      if (tr?.type !== "tool_result") throw new Error("expected tool_result");
+      expect(JSON.parse(tr.result)).toEqual({ ok: false, reason: "rate_limited" });
+      expect(tr.approved).toBe(true); // tool was approved to run; result was the rejection
+
+      // No new session_renamed event for the second attempt.
+      const renameBroadcasts = broadcasts.filter(
+        (e) => e.type === "session_renamed" && e.sessionId === sessionId,
+      );
+      expect(renameBroadcasts.length).toBe(1);
+    }
+  }, 30_000);
+
+  it("manual-rename lock: PATCH between turns locks the session", async () => {
+    const store = new SessionStore({ root: sessionsRoot });
+    const registry = new SessionRegistry();
+    const syncHub = new SyncHub();
+
+    const meta = await store.create({ cwd: process.cwd(), model: "test-model" });
+    const sessionId = meta.id;
+
+    // ─── First turn: model renames successfully ───────────────────
+    {
+      const { writer } = recordingWriter();
+      const approver = new InteractiveApprover(
+        writer, syncHub, sessionId, [], [], { timeoutMs: 5_000 },
+      );
+      const start = registry.startIfIdle(sessionId, approver, "test-tab");
+      await runAgentForSession(
+        {
+          store, registry, config: makeConfig(),
+          createProvider: renameProvider(), syncHub,
+        },
+        sessionId, "u1", writer, start.runtime,
+      );
+      const after = await store.get(sessionId);
+      expect(after?.title).toBe("K8s backup script");
+    }
+
+    // ─── User PATCH between turns: locks the session. The HTTP
+    // route stamps `titleSource: "manual"` automatically; calling
+    // `store.patch` directly bypasses that inference, so we set
+    // both fields explicitly. ──────────────────────────────────────
+    await store.patch(sessionId, {
+      title: "My Custom Title",
+      titleSource: "manual",
+    });
+
+    // ─── Second turn: model tries to rename → rejected ────────────
+    {
+      const { writer, events } = recordingWriter();
+      const approver = new InteractiveApprover(
+        writer, syncHub, sessionId, [], [], { timeoutMs: 5_000 },
+      );
+      const start = registry.startIfIdle(sessionId, approver, "test-tab");
+      // Use a fresh provider so it emits a rename on its first chat.
+      await runAgentForSession(
+        {
+          store, registry, config: makeConfig(),
+          createProvider: renameProvider(), syncHub,
+        },
+        sessionId, "u2", writer, start.runtime,
+      );
+
+      const after = await store.get(sessionId);
+      // The manual title sticks.
+      expect(after?.title).toBe("My Custom Title");
+      expect(after?.titleSource).toBe("manual");
+
+      // The rename call returned the rejection.
+      const tr = events.find(
+        (e) => e.type === "tool_result" && e.call_id === "r1",
+      );
+      if (tr?.type !== "tool_result") throw new Error("expected tool_result");
+      expect(JSON.parse(tr.result)).toEqual({ ok: false, reason: "manual_rename_locked" });
+    }
+  }, 30_000);
+
+  it("audit log records rename_session as a tool_result with approve_once", async () => {
+    const store = new SessionStore({ root: sessionsRoot });
+    const registry = new SessionRegistry();
+    const syncHub = new SyncHub();
+
+    const meta = await store.create({ cwd: process.cwd(), model: "test-model" });
+    const sessionId = meta.id;
+
+    const { writer } = recordingWriter();
+    const approver = new InteractiveApprover(
+      writer, syncHub, sessionId, [], [], { timeoutMs: 5_000 },
+    );
+    const start = registry.startIfIdle(sessionId, approver, "test-tab");
+    await runAgentForSession(
+      {
+        store, registry, config: makeConfig(),
+        createProvider: renameProvider(), syncHub,
+      },
+      sessionId, "first turn", writer, start.runtime,
+    );
+
+    // Wait for the audit to land.
+    let audit: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < 100; i++) {
+      audit = readAudit(sessionsRoot, sessionId);
+      if (audit.length >= 1) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(audit.length).toBe(1);
+    expect(audit[0]!.tool).toBe("rename_session");
+    expect(audit[0]!.decision).toBe("approve_once");
+  }, 15_000);
+});
