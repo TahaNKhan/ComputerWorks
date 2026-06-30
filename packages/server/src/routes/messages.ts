@@ -154,6 +154,10 @@ export async function runAgentForSession(
       memory,
       cwd: meta.cwd,
       model,
+      // T19.6 — gate the Session title system-prompt section on the
+      // operator's config flag. When false, the model never learns
+      // about rename_session.
+      llmDecides: deps.config.title.llmDecides,
     });
 
     // Load prior history.

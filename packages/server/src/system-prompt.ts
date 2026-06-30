@@ -5,6 +5,14 @@
 // (project identity + tool rules + approval rules) followed by a
 // listing of available memory notes (title + first ~200 chars) so the
 // agent knows what to read_memory for.
+//
+// T19.6 — when `llmDecides` is true, the prompt gains a "Session
+// title" section that teaches the model about the `rename_session`
+// tool (when to call it, when not to). Setting `llmDecides` to
+// false omits the section, which is the documented way to disable
+// LLM-driven retitling — operators who don't want the sidebar to
+// ever auto-update can flip the env var and the model never learns
+// the tool exists.
 
 import type { MemoryProvider } from "@computerworks/memory-files";
 
@@ -27,6 +35,36 @@ function shellSafetyBlock(): string {
   about to run.
 - Prefer non-destructive commands first (\`ls\`, \`git status\`).
 - Don't pipe untrusted input through \`sh\` or \`eval\`.`;
+}
+
+/** T19.6 — the "Session title" section. Inlined when `llmDecides`
+ *  is true; omitted entirely when false. Kept as a separate string
+ *  so the test can assert inclusion/exclusion without rebuilding the
+ *  whole prompt. */
+function sessionTitleBlock(): string {
+  return `## Session title
+
+The session title is shown in the sidebar and helps the user find
+this conversation later. You can update it by calling the
+\`rename_session\` tool with a 3-5 word title.
+
+Call \`rename_session\` when:
+- The current title no longer describes the topic (e.g. the user
+  shifted from "K8s backup" to "React component").
+- You can summarize the conversation confidently (don't call it on
+  turn 1 if the user only said "hi" and you have no signal yet).
+
+Do NOT call \`rename_session\`:
+- On every turn — the server rate-limits you. If you call it too
+  soon after the previous rename, the tool returns \`rate_limited\`.
+- If the user has manually renamed the session. The server rejects
+  with \`manual_rename_locked\`; respect their choice.
+- For trivial exchanges that don't change the topic.
+
+The tool sanitizes your input (strips quotes, collapses whitespace,
+truncates to 80 chars at a word boundary). Reply with the raw title
+text only — no quotes, no prefix, no explanation.
+`;
 }
 
 const STATIC_PREFIX = `# ComputerWorks — session context
@@ -67,6 +105,11 @@ export interface BuildSystemPromptOptions {
   model: string;
   /** Truncate memory list to this many entries to bound prompt size. */
   maxMemoryEntries?: number;
+  /** T19.6 — when true (default), include the "Session title"
+   *  section that teaches the model about `rename_session`.
+   *  Operators disable LLM-driven retitling by setting this to
+   *  false (config.title.llmDecides). */
+  llmDecides?: boolean;
 }
 
 /**
@@ -80,8 +123,12 @@ export async function buildSystemPrompt(
   const max = opts.maxMemoryEntries ?? 30;
   const notes = await opts.memory.list();
   const truncated = notes.slice(0, max);
+  const llmDecides = opts.llmDecides ?? true;
 
   const lines: string[] = [STATIC_PREFIX];
+  if (llmDecides) {
+    lines.push(sessionTitleBlock());
+  }
   lines.push(`## Session`);
   lines.push(`- cwd: \`${opts.cwd}\``);
   lines.push(`- model: \`${opts.model}\``);
