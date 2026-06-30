@@ -1339,6 +1339,28 @@ model emits on turn 1.
     - `CLAUDE.md` "Phase status" reflects Phase 19 done
     - `bun run typecheck && bun test` is green
 
+- [x] T19.14 — Anthropic provider: stream tokens progressively #phase19 @ready target:phase19 _done:2026-06-29
+  - **Files**: `packages/core/src/providers/anthropic.ts`,
+    `packages/core/src/providers/anthropic.test.ts`
+  - **Deps**: none
+  - **Done when**:
+    - The `run()` async generator in `anthropic.ts` no longer buffers
+      every Anthropic stream event into an array and only resolves
+      the consumer Promise on stream end. It uses the SDK's native
+      `Symbol.asyncIterator` (already implemented on `MessageStream`)
+      and yields each translated `StreamEvent` as it arrives
+    - The signal abort path still cancels cleanly (the SDK aborts the
+      underlying fetch when `signal` fires; our generator must stop
+      yielding and exit)
+    - A regression test mocks `globalThis.fetch` with a streaming
+      `ReadableStream` Response that emits each SSE frame on a small
+      delay. The test drives `provider.chat(...)` and asserts that
+      `token` events arrive in order with a measurable wall-clock
+      gap between them (would fail under the old buffered bridge,
+      which delivers every token at the same timestamp at the end of
+      the stream)
+    - `bun run typecheck && bun test` is green
+
 ### Phase 20 — Skills support
 Skills are pre-defined bundles of (prompt prefix + tool
 allowlist + optional setup script) the user can invoke by name.

@@ -596,3 +596,119 @@ describe("getDefaultAnthropicProvider", () => {
     setEnv("MINIMAX_BASE_URL", "https://api.minimax.io/anthropic");
   });
 });
+
+// ─── Progressive streaming (T19.14) ───────────────────────────────────────
+//
+// Regression for "the SSE stream returns all the tokens at once rather
+// than streaming them". The previous implementation of
+// `createAnthropicProvider.run` buffered every Anthropic stream event
+// into a single array and only resolved the consumer Promise when the
+// SDK emitted `'end'`. Tokens therefore all landed at the same wall
+// timestamp, after the entire Anthropic response had been received.
+//
+// The fix iterates the SDK's own `MessageStream[Symbol.asyncIterator]`
+// (a real async queue: pushQueue + readQueue). This test wires
+// `globalThis.fetch` to a `ReadableStream` Response that emits each
+// SSE frame on a small delay, captures the wall-clock timestamps at
+// which `provider.chat(...)` yields `token` events, and asserts that
+// the tokens arrive in order with measurable gaps between them — which
+// the buffered implementation cannot satisfy because every token
+// landed at the same moment after the stream ended.
+
+function frame(event: string, data: unknown): string {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
+describe("createAnthropicProvider — progressive token streaming", () => {
+  it("delivers token events as they arrive, not buffered at stream end", async () => {
+    // Delays (ms) applied *before* each subsequent frame is enqueued.
+    // Total wall time if consumed progressively = sum(delays) ≈ 150ms.
+    // If the provider buffers, the first token arrives at ≥ 150ms.
+    const delays = [40, 60, 40, 0];
+    const frames = [
+      frame("message_start", {
+        type: "message_start",
+        message: {
+          id: "msg_test", type: "message", role: "assistant",
+          content: [], model: "MiniMax-M3",
+          stop_reason: null, stop_sequence: null,
+          usage: { input_tokens: 0, output_tokens: 0 },
+        },
+      }),
+      frame("content_block_start", {
+        type: "content_block_start", index: 0,
+        content_block: { type: "text", text: "" },
+      }),
+      frame("content_block_delta", {
+        type: "content_block_delta", index: 0,
+        delta: { type: "text_delta", text: "a" },
+      }),
+      frame("content_block_delta", {
+        type: "content_block_delta", index: 0,
+        delta: { type: "text_delta", text: "b" },
+      }),
+      frame("content_block_delta", {
+        type: "content_block_delta", index: 0,
+        delta: { type: "text_delta", text: "c" },
+      }),
+      frame("content_block_stop", { type: "content_block_stop", index: 0 }),
+      frame("message_stop", { type: "message_stop" }),
+    ];
+
+    globalThis.fetch = mock(
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      async (_url: string | URL | Request, _init?: RequestInit) => {
+        const enc = new TextEncoder();
+        const body = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            try {
+              for (let i = 0; i < frames.length; i++) {
+                controller.enqueue(enc.encode(frames[i]!));
+                const wait = delays[i] ?? 0;
+                if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+              }
+            } finally {
+              controller.close();
+            }
+          },
+        });
+        return new Response(body, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      },
+    ) as unknown as typeof fetch;
+
+    const { createAnthropicProvider } = await import("./anthropic.js");
+    const provider = createAnthropicProvider();
+
+    const tokenTimes: number[] = [];
+    const tokenDeltas: string[] = [];
+    const start = performance.now();
+    for await (const ev of provider.chat({
+      model: "",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [],
+    })) {
+      if (ev.type === "token") {
+        tokenTimes.push(performance.now() - start);
+        tokenDeltas.push(ev.delta);
+      }
+    }
+
+    expect(tokenDeltas).toEqual(["a", "b", "c"]);
+    expect(tokenTimes.length).toBe(3);
+
+    // Tokens arrive in order.
+    expect(tokenTimes[1]!).toBeGreaterThan(tokenTimes[0]!);
+    expect(tokenTimes[2]!).toBeGreaterThan(tokenTimes[1]!);
+
+    // First token arrives substantially *before* the total streaming
+    // time (140ms of delays before the third frame). A buffered
+    // implementation would see the first token ≥ 140ms after start;
+    // a progressive one sees it after message_start + content_block_start
+    // + first delta, roughly within the first ~100ms. Pick a
+    // generous threshold to keep the test stable on a loaded CI.
+    expect(tokenTimes[0]!).toBeLessThan(140);
+  }, 5_000);
+});

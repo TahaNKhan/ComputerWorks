@@ -394,40 +394,27 @@ export function createAnthropicProvider(
         { signal: req.signal },
       );
 
-      // The Anthropic SDK's MessageStream uses an EventEmitter, not async
-      // iteration. Bridge it into our AsyncIterable<StreamEvent> shape.
-      yield* await new Promise<AsyncGenerator<StreamEvent, void, void>>(
-        (resolve, reject) => {
-          const out: StreamEvent[] = [];
-          let done = false;
-
-          const finish = () => {
-            if (done) return;
-            done = true;
-            async function* gen(): AsyncGenerator<StreamEvent, void, void> {
-              while (out.length) {
-                const ev = out.shift()!;
-                yield ev;
-              }
-              yield { type: "done" };
-            }
-            resolve(gen());
-          };
-
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (stream as any).on("streamEvent", (ev: { type: string; [k: string]: unknown }) => {
-            if (req.signal?.aborted) return;
-            translateEvent(ev as RawEvent, (e) => out.push(e), sink);
-          });
-          (stream as any).on("error", (err: unknown) => {
-            if (req.signal?.aborted) return;
-            const message = err instanceof Error ? err.message : String(err);
-            out.push({ type: "error", message });
-            finish();
-          });
-          (stream as any).on("end", () => { finish(); });
-        },
-      );
+      // The Anthropic SDK's MessageStream implements AsyncIterable
+      // natively — iterate it directly so each translated StreamEvent
+      // reaches the consumer as soon as it arrives. The previous
+      // EventEmitter bridge buffered every event into an array and
+      // only resolved the consumer Promise on stream end, which made
+      // every token (and every tool_use chunk) land in the UI in one
+      // batch after the entire Anthropic response had been received.
+      // Cast through unknown because the SDK's MessageStreamEvent
+      // union is structurally compatible with our RawEvent but not
+      // assignable across packages.
+      for await (const raw of stream as unknown as AsyncIterable<RawEvent>) {
+        if (req.signal?.aborted) break;
+        // `translateEvent` emits at most one StreamEvent per raw
+        // event, so a single slot is enough. `yield` isn't allowed
+        // inside the callback (it's an arrow function), so we
+        // capture and yield outside.
+        let translated: StreamEvent | null = null;
+        translateEvent(raw, (e) => { translated = e; }, sink);
+        if (translated !== null) yield translated;
+      }
+      yield { type: "done" };
     } catch (err) {
       if (req.signal?.aborted) return;
       const message = err instanceof Error ? err.message : String(err);
@@ -532,14 +519,4 @@ export function getDefaultAnthropicProvider(): AnthropicProvider {
  */
 export function resetDefaultAnthropicProvider(): void {
   _defaultProvider = null;
-}
-
-function* emitFromSink(
-  _raw: RawEvent,
-  sink: { pendingUsage?: { input: number; output: number } },
-): Generator<StreamEvent, void, void> {
-  if (sink.pendingUsage) {
-    yield { type: "message_done", usage: sink.pendingUsage };
-    sink.pendingUsage = undefined;
-  }
 }
