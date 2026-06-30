@@ -66,6 +66,52 @@ const ECHO_TOOL: ToolDefinition = {
   },
 };
 
+/** Scripted provider that calls rename_session on its first turn,
+ *  then emits a text reply. Used by T19.13 to pin the per-message
+ *  SSE behavior when the model issues the rename. */
+function renameScriptedProvider(): Provider {
+  const cursor = { i: 0 };
+  return {
+    id: "scripted",
+    capabilities: { toolUse: true, promptCaching: false, vision: false },
+    chat(): AsyncIterable<StreamEvent> {
+      cursor.i++;
+      const i = cursor.i;
+      const frame: StreamEvent[] = i === 1
+        ? [
+            { type: "message_start" },
+            {
+              type: "tool_call",
+              call: {
+                type: "tool_use",
+                id: "r1",
+                name: "rename_session",
+                input: { title: "K8s backup script" },
+              },
+            },
+            { type: "message_done", usage: { input: 1, output: 1 } },
+          ]
+        : [
+            { type: "message_start" },
+            { type: "token", delta: "ok" },
+            { type: "message_done", usage: { input: 1, output: 1 } },
+          ];
+      return {
+        [Symbol.asyncIterator]() {
+          let idx = 0;
+          return {
+            async next() {
+              if (idx >= frame.length) return { value: undefined, done: true };
+              return { value: frame[idx++]!, done: false };
+            },
+            async return() { return { value: undefined, done: true }; },
+          };
+        },
+      };
+    },
+  };
+}
+
 /** Build a scripted provider that yields one tool_call then a text reply. */
 function scriptedProvider(): Provider {
   return scriptedProviderWithFrames(
@@ -435,6 +481,49 @@ describe("POST /api/sessions/:id/messages (per-message SSE)", () => {
     // (only manual renames are sticky).
     expect(meta?.titleSource).toBe("auto");
   }, 5_000);
+
+  it("T19.13 — per-message SSE delivers tool_call + tool_result + done when the model calls rename_session", async () => {
+    // Repro for the user's bug: "once the title is sent the sse
+    // breaks". After the model calls rename_session, the leader's
+    // per-message SSE must still deliver the tool_result for that
+    // call AND the terminal done frame. If either is missing, the
+    // chat view stalls or the connection looks broken.
+    const store = new SessionStore({ root: sessionsRoot });
+    const app = await buildApp({
+      config: { ...baseConfig, server: { ...baseConfig.server!, port: 4747 } },
+      store,
+      createProvider: renameScriptedProvider,
+      autoApprove: true,
+    });
+
+    const create = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const sessionId = create.json().id;
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${sessionId}/messages`,
+      payload: { content: "Help me with K8s backups" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/text\/event-stream/);
+
+    const body = res.body;
+    // Order: tool_call → tool_result → token("ok") → terminal done.
+    // No session_renamed on the per-message stream — that arrives
+    // via the central SSE.
+    const toolCallIdx = body.indexOf("event: tool_call");
+    const toolResultIdx = body.indexOf("event: tool_result");
+    const tokenIdx = body.indexOf("event: token");
+    const doneIdx = body.lastIndexOf("event: done");
+    expect(toolCallIdx).toBeGreaterThan(-1);
+    expect(toolResultIdx).toBeGreaterThan(toolCallIdx);
+    expect(tokenIdx).toBeGreaterThan(toolResultIdx);
+    expect(doneIdx).toBeGreaterThan(tokenIdx);
+
+    // Exactly one terminal done frame.
+    const doneCount = (body.match(/event: done/g) ?? []).length;
+    expect(doneCount).toBe(1);
+  });
 
   it("does not overwrite a manual title with auto-title", async () => {
     const store = new SessionStore({ root: sessionsRoot });

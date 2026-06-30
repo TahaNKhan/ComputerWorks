@@ -1339,6 +1339,21 @@ model emits on turn 1.
     - `CLAUDE.md` "Phase status" reflects Phase 19 done
     - `bun run typecheck && bun test` is green
 
+- [x] T19.13 — Per-message SSE delivers tool_call + tool_result + done after `rename_session` #phase19 @ready target:phase19 _done:2026-06-29
+  - **Files**: `packages/server/src/app.test.ts`
+  - **Deps**: T19.7 (rename_session integration), T19.11
+    (current-title surface)
+  - **Done when**:
+    - A new test drives the per-message SSE through a turn that
+      includes a `rename_session` tool call followed by a text
+      reply, and asserts the SSE body contains, in order:
+      `tool_call` → `tool_result` → `token` → exactly one terminal
+      `done`
+    - The `renameScriptedProvider` test fixture yields
+      `tool_call(rename_session)` on the first iteration and
+      `token("ok")` on the second
+    - `bun run typecheck && bun test` is green
+
 - [x] T19.14 — Anthropic provider: stream tokens progressively #phase19 @ready target:phase19 _done:2026-06-29
   - **Files**: `packages/core/src/providers/anthropic.ts`,
     `packages/core/src/providers/anthropic.test.ts`
